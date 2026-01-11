@@ -89,11 +89,20 @@ int send_vpi_command_timeout(int sock, jtag_cmd_t *cmd, jtag_resp_t *resp) {
     /* Send with timeout */
     FD_ZERO(&writeset);
     FD_SET(sock, &writeset);
-    if (select(sock + 1, NULL, &writeset, NULL, &tv) <= 0) {
+    fprintf(stderr, "[DEBUG] Waiting for write ready (timeout %ds)...\n", TIMEOUT_SEC);
+    int sel = select(sock + 1, NULL, &writeset, NULL, &tv);
+    fprintf(stderr, "[DEBUG] Select returned: %d\n", sel);
+    if (sel <= 0) {
+        fprintf(stderr, "[DEBUG] Write select timeout or error\n");
         return -1;  /* Timeout or error */
     }
     
-    if (send(sock, cmd, sizeof(*cmd), 0) != sizeof(*cmd)) {
+    fprintf(stderr, "[DEBUG] Sending %zu bytes: cmd=0x%02x tms=%d tdi=%d\n", 
+            sizeof(*cmd), cmd->cmd, cmd->tms_val, cmd->tdi_val);
+    ret = send(sock, cmd, sizeof(*cmd), 0);
+    fprintf(stderr, "[DEBUG] Send returned: %d\n", ret);
+    if (ret != sizeof(*cmd)) {
+        fprintf(stderr, "[DEBUG] Send failed: expected %zu, got %d\n", sizeof(*cmd), ret);
         return -1;
     }
 
@@ -103,12 +112,19 @@ int send_vpi_command_timeout(int sock, jtag_cmd_t *cmd, jtag_resp_t *resp) {
     tv.tv_sec = TIMEOUT_SEC;
     tv.tv_usec = 0;
     
-    if (select(sock + 1, &readset, NULL, NULL, &tv) <= 0) {
+    fprintf(stderr, "[DEBUG] Waiting for read ready (timeout %ds)...\n", TIMEOUT_SEC);
+    sel = select(sock + 1, &readset, NULL, NULL, &tv);
+    fprintf(stderr, "[DEBUG] Select returned: %d\n", sel);
+    if (sel <= 0) {
+        fprintf(stderr, "[DEBUG] Read select timeout or error\n");
         return -1;  /* Timeout or error */
     }
     
+    fprintf(stderr, "[DEBUG] Receiving %zu bytes...\n", sizeof(*resp));
     ret = recv(sock, resp, sizeof(*resp), 0);
+    fprintf(stderr, "[DEBUG] Recv returned: %d, response=0x%02x\n", ret, resp->response);
     if (ret != sizeof(*resp)) {
+        fprintf(stderr, "[DEBUG] Recv failed: expected %zu, got %d\n", sizeof(*resp), ret);
         return -1;
     }
 
