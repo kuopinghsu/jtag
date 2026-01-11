@@ -15,23 +15,23 @@ module oscan1_controller #(
 )(
     input  logic       clk,
     input  logic       rst_n,
-    
+
     // Physical cJTAG interface
     input  logic       tckc,           // cJTAG clock/data input
     input  logic       tmsc_in,        // cJTAG TMSC input
     output logic       tmsc_out,       // cJTAG TMSC output
     output logic       tmsc_oen,       // cJTAG TMSC output enable
-    
+
     // Decoded JTAG signals output
     output logic       jtag_tck,       // Decoded TCK
     output logic       jtag_tms,       // Decoded TMS
     output logic       jtag_tdi,       // Decoded TDI
     input  logic       jtag_tdo,       // TDO to send back
-    
+
     // Control/Status
     output logic       oscan_active,   // OScan1 mode active
     output logic       error,          // Protocol error detected
-    
+
     // Error statistics
     output logic [15:0] crc_error_count,
     output logic [15:0] parity_error_count
@@ -49,16 +49,16 @@ module oscan1_controller #(
         OSCAN_SF2   = 4'h5,  // OScan1 active, SF2 format
         ERROR       = 4'hF   // Error state
     } state_t;
-    
+
     state_t state, next_state;
-    
+
     // ========================================
     // OScan1 Parameters
     // ========================================
     localparam OAC_EDGES = 16;           // OAC = 16 consecutive edges
     localparam JSCAN_LENGTH = 4;         // JScan0 = 4 bits
     localparam ZERO_STUFF_COUNT = 5;     // Insert zero after 5 ones
-    
+
     // JScan Commands
     typedef enum logic [3:0] {
         JSCAN_OSCAN_OFF = 4'h0,
@@ -69,7 +69,7 @@ module oscan1_controller #(
         JSCAN_READ_ID   = 4'h5,
         JSCAN_NOOP      = 4'hF
     } jscan_cmd_t;
-    
+
     // ========================================
     // Internal Registers
     // ========================================
@@ -77,33 +77,33 @@ module oscan1_controller #(
     logic [3:0]  jscan_cmd;              // JScan command register
     logic [2:0]  jscan_bit_count;        // JScan bit counter
     logic [1:0]  scan_format;            // Current scanning format (0=SF0, 1=SF1, 2=SF2)
-    
+
     // TCKC edge detection
     logic        tckc_d1, tckc_d2;
     logic        tckc_rising, tckc_falling;
     logic        tckc_edge;
-    
+
     // TMSC sampling
     logic        tmsc_sample;
-    
+
     // Zero stuffing
     logic [2:0]  ones_count;             // Consecutive ones counter
     logic        zero_inserted;          // Zero was inserted
     logic        zero_deleted;           // Zero was deleted
-    
+
     // Bit stream processing
     logic        bit_valid;              // Valid bit decoded
     logic        bit_data;               // Decoded bit value
-    
+
     // Scanning Format 0 (SF0) decoder
     logic [1:0]  sf0_bits;               // SF0 accumulates 2 bits (TDI, TMS)
     logic        sf0_bit_count;          // 0 or 1
     logic        sf0_packet_ready;       // 2 bits ready
-    
+
     // TDO handling
     logic        tdo_ready;              // TDO data ready to send
     logic        tdo_bit;                // TDO bit to send
-    
+
     // CRC/Parity signals
     logic [7:0]  data_byte;              // Data byte for CRC/parity
     logic        data_valid;             // Data byte valid
@@ -113,11 +113,11 @@ module oscan1_controller #(
     logic        crc_error;              // CRC error detected
     logic        parity_error;           // Parity error detected
     logic        clear_errors;           // Clear error counters
-    
+
     // ========================================
     // CRC/Parity Checker Instantiation
     // ========================================
-    
+
     cjtag_crc_parity #(
         .ENABLE_CRC(ENABLE_CRC),
         .ENABLE_PARITY(ENABLE_PARITY)
@@ -139,7 +139,7 @@ module oscan1_controller #(
         .parity_error_count(parity_error_count),
         .clear_errors(clear_errors)
     );
-    
+
     // ========================================
     // TCKC Edge Detection
     // ========================================
@@ -152,11 +152,11 @@ module oscan1_controller #(
             tckc_d2 <= tckc_d1;
         end
     end
-    
+
     assign tckc_rising  = tckc_d1 && !tckc_d2;
     assign tckc_falling = !tckc_d1 && tckc_d2;
     assign tckc_edge    = tckc_rising || tckc_falling;
-    
+
     // ========================================
     // OAC (Attention Character) Detector
     // ========================================
@@ -177,10 +177,10 @@ module oscan1_controller #(
             end
         end
     end
-    
+
     logic oac_detected;
     assign oac_detected = (edge_count == OAC_EDGES - 1) && tckc_edge;
-    
+
     // ========================================
     // TMSC Sampling
     // ========================================
@@ -194,7 +194,7 @@ module oscan1_controller #(
             end
         end
     end
-    
+
     // ========================================
     // Zero Insertion/Deletion (Bit Stuffing)
     // ========================================
@@ -225,11 +225,11 @@ module oscan1_controller #(
             end
         end
     end
-    
+
     // Valid bit = not a stuffed zero
     assign bit_valid = tckc_falling && !zero_deleted;
     assign bit_data = tmsc_sample;
-    
+
     // ========================================
     // JScan Packet Parser
     // ========================================
@@ -248,10 +248,10 @@ module oscan1_controller #(
             end
         end
     end
-    
+
     logic jscan_complete;
     assign jscan_complete = (jscan_bit_count == JSCAN_LENGTH) && bit_valid;
-    
+
     // ========================================
     // Scanning Format 0 (SF0) Decoder
     // ========================================
@@ -286,7 +286,7 @@ module oscan1_controller #(
             end
         end
     end
-    
+
     // ========================================
     // JTAG Signal Generation
     // ========================================
@@ -306,7 +306,7 @@ module oscan1_controller #(
             end
         end
     end
-    
+
     // ========================================
     // TDO Return Path (TMSC Output)
     // ========================================
@@ -324,7 +324,7 @@ module oscan1_controller #(
                     tdo_bit <= jtag_tdo;
                     tdo_ready <= 1'b1;
                 end
-                
+
                 // Send TDO on next TCKC rising edge
                 if (tdo_ready && tckc_rising) begin
                     tmsc_out <= tdo_bit;
@@ -340,7 +340,7 @@ module oscan1_controller #(
             end
         end
     end
-    
+
     // ========================================
     // State Machine
     // ========================================
@@ -351,23 +351,23 @@ module oscan1_controller #(
             state <= next_state;
         end
     end
-    
+
     always_comb begin
         next_state = state;
-        
+
         case (state)
             IDLE: begin
                 if (tckc_edge) begin
                     next_state = OAC_DETECT;
                 end
             end
-            
+
             OAC_DETECT: begin
                 if (oac_detected) begin
                     next_state = JSCAN;
                 end
             end
-            
+
             JSCAN: begin
                 if (jscan_complete) begin
                     case (jscan_cmd)
@@ -387,39 +387,39 @@ module oscan1_controller #(
                     endcase
                 end
             end
-            
+
             OSCAN_SF0: begin
                 // Stay in SF0 until OSCAN_OFF command
                 if (oac_detected) begin
                     next_state = JSCAN;
                 end
             end
-            
+
             OSCAN_SF1: begin
                 // SF1 not implemented yet
                 if (oac_detected) begin
                     next_state = JSCAN;
                 end
             end
-            
+
             OSCAN_SF2: begin
                 // SF2 not implemented yet
                 if (oac_detected) begin
                     next_state = JSCAN;
                 end
             end
-            
+
             ERROR: begin
                 // Stay in error until reset
                 next_state = ERROR;
             end
-            
+
             default: begin
                 next_state = IDLE;
             end
         endcase
     end
-    
+
     // ========================================
     // Status Outputs
     // ========================================

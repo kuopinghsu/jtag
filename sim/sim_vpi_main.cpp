@@ -4,6 +4,7 @@
  */
 
 #include "Vjtag_vpi_top.h"
+#include "Vjtag_vpi_top___024root.h"  // For internal signal access
 #include "verilated.h"
 #include "verilated_fst_c.h"
 #include "jtag_vpi_server.h"
@@ -51,6 +52,8 @@ int main(int argc, char** argv) {
     bool trace_enabled = false;
     bool verbose = true;  // Default: show status messages
     bool cjtag_mode = false;  // Default: JTAG mode
+    bool msb_first = false;    // Default: LSB-first bit packing
+    std::string proto_mode = "auto"; // Default: auto-detect protocol
     uint64_t timeout_seconds = DEFAULT_TIMEOUT_SECONDS;
     
     for (int i = 1; i < argc; i++) {
@@ -64,6 +67,12 @@ int main(int argc, char** argv) {
             verbose = false;
         } else if (arg == "--verbose" || arg == "-v") {
             verbose = true;
+        } else if (arg == "--msb-first") {
+            msb_first = true;
+        } else if (arg == "--proto" && i + 1 < argc) {
+            proto_mode = argv[++i];
+        } else if (arg.rfind("--proto=", 0) == 0) {
+            proto_mode = arg.substr(8);
         } else if (arg == "--timeout" && i + 1 < argc) {
             // Format: --timeout 60
             timeout_seconds = std::stoull(argv[++i]);
@@ -79,6 +88,7 @@ int main(int argc, char** argv) {
             std::cout << "  --timeout=<seconds>      Alternative timeout format" << std::endl;
             std::cout << "  --quiet, -q              Suppress cycle status messages" << std::endl;
             std::cout << "  --verbose, -v            Show cycle status messages (default)" << std::endl;
+            std::cout << "  --proto <mode>           Protocol: auto | openocd | legacy (default: auto)" << std::endl;
             std::cout << "  --help, -h               Show this help message" << std::endl;
             delete top;
             return 0;
@@ -88,9 +98,21 @@ int main(int argc, char** argv) {
     uint64_t max_cycles = timeout_seconds * 100000000ULL; // 100MHz clock
     std::cout << "[SIM] Mode: " << (cjtag_mode ? "cJTAG" : "JTAG") << std::endl;
     std::cout << "[SIM] Timeout: " << timeout_seconds << "s (" << max_cycles << " cycles)" << std::endl;
+    std::cout << "[SIM] Bit order: " << (msb_first ? "MSB-first" : "LSB-first") << std::endl;
+    std::cout << "[SIM] Protocol: " << (proto_mode) << std::endl;
     
     // Set mode_select based on cjtag_mode flag
     top->mode_select = cjtag_mode ? 1 : 0;
+    // Configure VPI server bit order
+    vpi_server.set_msb_first(msb_first);
+    // Configure protocol mode
+    if (proto_mode == "openocd") {
+        vpi_server.set_protocol_mode(JtagVpiServer::PROTO_OPENOCD_VPI);
+    } else if (proto_mode == "legacy") {
+        vpi_server.set_protocol_mode(JtagVpiServer::PROTO_LEGACY_8BYTE);
+    } else {
+        vpi_server.set_protocol_mode(JtagVpiServer::PROTO_UNKNOWN);
+    }
     
     if (trace_enabled) {
         contextp->traceEverOn(true);
@@ -131,11 +153,28 @@ int main(int argc, char** argv) {
             }
             
             // Update VPI server with current signal values
+            // TDO tri-state: when tdo_en=0 (high-z), JTAG default is 1
+            uint8_t tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
             vpi_server.update_signals(
-                top->jtag_pin3_o,
+                tdo_value,
+                top->jtag_pin3_oen,
                 top->idcode,
                 top->active_mode
             );
+            
+            // DEBUG: Log RTL internal signals
+            static uint8_t last_tdo = 0;
+            static uint8_t last_tdo_en = 0;
+            static uint8_t last_tap_state = 0xFF;
+            static int signal_log_count = 0;
+            uint8_t tap_state = top->rootp->jtag_vpi_top__DOT__dut__DOT__tap_ctrl__DOT__current_state;
+            
+            if (signal_log_count < 1 && (top->jtag_pin3_o != last_tdo || top->jtag_pin3_oen != last_tdo_en || tap_state != last_tap_state)) {
+                last_tdo = top->jtag_pin3_o;
+                last_tdo_en = top->jtag_pin3_oen;
+                last_tap_state = tap_state;
+                signal_log_count++;
+            }
             
             // Get pending commands from VPI clients
             uint8_t tms, tdi, mode_sel;
@@ -158,8 +197,11 @@ int main(int argc, char** argv) {
                     contextp->timeInc(1);
                     
                     // Update TDO after pulse
+                    // TDO tri-state: when tdo_en=0 (high-z), JTAG default is 1
+                    tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
                     vpi_server.update_signals(
-                        top->jtag_pin3_o,
+                        tdo_value,
+                        top->jtag_pin3_oen,
                         top->idcode,
                         top->active_mode
                     );
@@ -170,7 +212,8 @@ int main(int argc, char** argv) {
             if (verbose && (cycle_count - last_status) >= 10000) {
                 std::cout << "[SIM] Cycle: " << cycle_count 
                           << " | IDCODE: 0x" << std::hex << top->idcode
-                          << " | Mode: " << (top->active_mode ? "cJTAG" : "JTAG")
+                          << " | Mode: cfg=" << (cjtag_mode ? "cJTAG" : "JTAG")
+                          << " active=" << (top->active_mode ? "cJTAG" : "JTAG")
                           << std::dec << std::endl;
                 last_status = cycle_count;
             }

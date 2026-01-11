@@ -10,29 +10,29 @@ import jtag_dmi_pkg::*;
 module jtag_top (
     input  logic        clk,
     input  logic        rst_n,
-    
+
     // 4 Shared Physical I/O Pins (JTAG 4-wire / cJTAG 2-wire)
     // Pin 0: TCK (JTAG mode) / TCKC (cJTAG mode) - Input only
     input  logic        jtag_pin0_i,
-    
+
     // Pin 1: TMS (JTAG mode) / TMSC (cJTAG mode) - Bidirectional
     input  logic        jtag_pin1_i,     // Input from pad
     output logic        jtag_pin1_o,     // Output to pad
     output logic        jtag_pin1_oen,   // Output enable (0=input, 1=output)
-    
+
     // Pin 2: TDI (JTAG mode) / Unused (cJTAG mode) - Input only
     input  logic        jtag_pin2_i,
-    
+
     // Pin 3: TDO (JTAG mode) / Unused (cJTAG mode) - Output only
     output logic        jtag_pin3_o,     // Output to pad
     output logic        jtag_pin3_oen,   // Output enable (0=tristate, 1=drive)
-    
+
     // Optional JTAG reset (JTAG mode only)
     input  logic        jtag_trst_n_i,
-    
+
     // Mode control (from control register)
     input  logic        mode_select,     // 0=JTAG (4-wire), 1=cJTAG (2-wire)
-    
+
     // DMI interface to Debug Module
     output logic [DMI_ADDR_WIDTH-1:0] dmi_addr,
     output logic [DMI_DATA_WIDTH-1:0] dmi_wdata,
@@ -41,25 +41,25 @@ module jtag_top (
     input  logic [1:0]                dmi_resp,    // dmi_resp_e
     output logic                      dmi_req_valid,
     input  logic                      dmi_req_ready,
-    
+
     // IDCODE output
     output logic [31:0] idcode,
-    
+
     // Mode status
     output logic        active_mode
 );
 
     // Internal JTAG signals (after mode demux)
     logic       jtag_tck, jtag_tms, jtag_tdi, jtag_trst_n;
-    
+
     // Internal cJTAG signals (after mode demux)
     logic       cjtag_tco, cjtag_tmsc_in, cjtag_tmsc_out, cjtag_tmsc_oen;
-    
+
     // TAP controller signals
     logic [3:0] tap_state;
     logic       shift_dr, shift_ir, update_dr, update_ir, capture_dr, capture_ir;
-    logic [7:0] ir_out;
-    
+    logic [4:0] ir_out;
+
     // TAP interface signals (from jtag_interface module)
     logic       tap_clk, tap_tms, tap_tdi, tap_tdo, tap_rst_n;
     logic       ir_out_tdo, dtm_tdo;
@@ -68,7 +68,7 @@ module jtag_top (
     // ========================================
     // Pin Multiplexing Based on Mode
     // ========================================
-    // 
+    //
     // Physical Pin Mapping:
     // JTAG Mode (4-wire):        cJTAG Mode (2-wire):
     //   Pin 0: TCK (in)            Pin 0: TCKC (in)
@@ -77,10 +77,10 @@ module jtag_top (
     //   Pin 3: TDO (out)           Pin 3: Unused
     //
     // ========================================
-    
+
     // Mode status output
     assign active_mode = mode_select;
-    
+
     // Input demultiplexing from physical pins
     always_comb begin
         if (mode_select) begin
@@ -103,7 +103,7 @@ module jtag_top (
             cjtag_tmsc_in   = 1'b0;
         end
     end
-    
+
     // Output multiplexing to physical pins
     always_comb begin
         if (mode_select) begin
@@ -120,7 +120,7 @@ module jtag_top (
             jtag_pin1_o   = 1'b0;              // Not used
             jtag_pin1_oen = 1'b0;              // Always input
             // Pin 3: TDO output
-            jtag_pin3_o   = tap_tdo;           // TDO data
+            jtag_pin3_o   = tap_tdo_internal;  // TDO data
             jtag_pin3_oen = shift_dr | shift_ir; // Enable during shift
         end
     end
@@ -128,9 +128,12 @@ module jtag_top (
     // ========================================
     // JTAG Interface - mode select and signal routing
     // ========================================
-    // Internal TDO signal from TAP/DTM multiplexer
+    // Internal TDO signal from TAP mux (before jtag_interface)
+    logic tap_tdo_mux;
+
+    // Final TDO signal from jtag_interface
     logic tap_tdo_internal;
-    
+
     jtag_interface jtag_iface (
         .clk              (clk),
         .rst_n            (rst_n),
@@ -138,7 +141,7 @@ module jtag_top (
         .tck              (jtag_tck),
         .tms              (jtag_tms),
         .tdi              (jtag_tdi),
-        .tdo              (tap_tdo),            // Output to pins
+        .tdo              (tap_tdo_internal),   // Output to pins (from jtag_interface)
         .trst_n           (jtag_trst_n),
         .tco              (cjtag_tco),
         .tmsc_in          (cjtag_tmsc_in),
@@ -148,7 +151,7 @@ module jtag_top (
         .jtag_clk         (tap_clk),
         .jtag_tms         (tap_tms),
         .jtag_tdi         (tap_tdi),
-        .jtag_tdo         (tap_tdo_internal),   // Input from TAP mux
+        .jtag_tdo         (tap_tdo_mux),        // Input from TAP mux
         .jtag_rst_n       (tap_rst_n),
         .active_mode      (),               // Driven directly by jtag_top
         .crc_error_count  (),               // Not exposed at top level
@@ -202,17 +205,17 @@ module jtag_top (
     );
 
     // TDO multiplexer - select between IR and DR data
-    // This drives tap_tdo_internal which goes back to jtag_interface
+    // This drives tap_tdo_mux which goes to jtag_interface as jtag_tdo input
     always_comb begin
         case (tap_state)
-            4'h9:    tap_tdo_internal = ir_out_tdo;   // IR_SELECT_SCAN
-            4'hA:    tap_tdo_internal = ir_out_tdo;   // IR_CAPTURE
-            4'hB:    tap_tdo_internal = ir_out_tdo;   // IR_SHIFT
-            4'hC:    tap_tdo_internal = ir_out_tdo;   // IR_EXIT1
-            4'hD:    tap_tdo_internal = ir_out_tdo;   // IR_PAUSE
-            4'hE:    tap_tdo_internal = ir_out_tdo;   // IR_EXIT2
-            4'hF:    tap_tdo_internal = ir_out_tdo;   // IR_UPDATE
-            default: tap_tdo_internal = dtm_tdo;      // DR operations
+            4'h9:    tap_tdo_mux = ir_out_tdo;        // IR_SELECT_SCAN
+            4'hA:    tap_tdo_mux = ir_out_tdo;        // IR_CAPTURE
+            4'hB:    tap_tdo_mux = ir_out_tdo;        // IR_SHIFT
+            4'hC:    tap_tdo_mux = ir_out_tdo;        // IR_EXIT1
+            4'hD:    tap_tdo_mux = ir_out_tdo;        // IR_PAUSE
+            4'hE:    tap_tdo_mux = ir_out_tdo;        // IR_EXIT2
+            4'hF:    tap_tdo_mux = ir_out_tdo;        // IR_UPDATE
+            default: tap_tdo_mux = dtm_tdo;           // DR operations
         endcase
     end
 

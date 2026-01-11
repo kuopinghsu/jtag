@@ -1,6 +1,6 @@
 # JTAG/cJTAG SystemVerilog Project Makefile
 
-.PHONY: all clean verilator vpi sim client help test-vpi synth synth-jtag synth-reports synth-clean
+.PHONY: all clean verilator vpi sim client help test-vpi synth synth-jtag synth-reports synth-clean test-jtag-legacy
 
 # Directories
 SRC_DIR := src
@@ -50,6 +50,7 @@ help:
 	@echo "  make client         - Build VPI client"
 	@echo "  make test-vpi       - Test VPI server and client (automatic)"
 	@echo "  make test-jtag      - Test JTAG mode with OpenOCD (automatic)"
+	@echo "  make test-jtag-legacy - Test legacy 8-byte protocol (automatic)"
 	@echo "  make test-cjtag     - Test cJTAG mode with OpenOCD (experimental)"
 	@echo "  make synth          - Synthesize all modules with ASAP7 PDK"
 	@echo "  make synth-jtag     - Synthesize JTAG top module only"
@@ -62,6 +63,7 @@ help:
 	@echo "  make verilator && make sim      (JTAG testbench)"
 	@echo "  make test-vpi                   (automated VPI test)"
 	@echo "  make test-jtag                  (automated JTAG test)"
+	@echo "  make test-jtag-legacy           (legacy protocol test)"
 	@echo "  make synth                      (ASAP7 synthesis)"
 
 verilator: $(BUILD_DIR)
@@ -107,7 +109,7 @@ clean: synth-clean
 	@echo "Cleaning build artifacts..."
 	@rm -rf $(BUILD_DIR)
 	@rm -f *.fst *.vcd *.fst.hier *.log
-	@rm -f openocd/test_jtag_protocol openocd/test_cjtag_protocol openocd/test_protocol
+	@rm -f openocd/test_jtag_protocol openocd/test_cjtag_protocol openocd/test_protocol openocd/test_legacy_protocol
 	@echo "✓ Clean complete"
 
 synth-clean:
@@ -198,17 +200,36 @@ $(BUILD_DIR)/jtag_vpi: $(BUILD_DIR)
 		$(SIM_DIR)/sim_vpi_main.cpp $(SIM_DIR)/jtag_vpi_server.cpp
 	@echo "✓ VPI simulation built: build/jtag_vpi"
 
-# Interactive VPI simulation target (runs foreground)
-vpi-sim: $(BUILD_DIR)/jtag_vpi
+# VPI simulation variants (protocol selection)
+vpi-sim-openocd: $(BUILD_DIR)/jtag_vpi
 	@echo ""
-	@echo "=== Starting JTAG VPI Interactive Simulation ==="
-	@echo "Server will listen on port 3333"
-	@echo "Timeout: 300 seconds"
-	@echo "Options: --trace (waveforms), --quiet (less output), --timeout=<sec>"
-	@echo "In another terminal, run OpenOCD or VPI client"
+	@echo "=== Starting JTAG VPI Simulation (OpenOCD Protocol) ==="
+	@echo "Protocol: OpenOCD jtag_vpi (1036-byte packets)"
+	@echo "Port: 3333"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@$(BUILD_DIR)/jtag_vpi --trace --timeout 300
+	@$(BUILD_DIR)/jtag_vpi --trace --timeout 300 --proto=openocd
+
+vpi-sim-legacy: $(BUILD_DIR)/jtag_vpi
+	@echo ""
+	@echo "=== Starting JTAG VPI Simulation (Legacy Protocol) ==="
+	@echo "Protocol: Legacy 8-byte header"
+	@echo "Port: 3333"
+	@echo "Press Ctrl+C to stop"
+	@echo ""
+	@$(BUILD_DIR)/jtag_vpi --trace --timeout 300 --proto=legacy
+
+vpi-sim-auto: $(BUILD_DIR)/jtag_vpi
+	@echo ""
+	@echo "=== Starting JTAG VPI Simulation (Auto-Detect Protocol) ==="
+	@echo "Protocol: Auto-detected at connection time"
+	@echo "Port: 3333"
+	@echo "Press Ctrl+C to stop"
+	@echo ""
+	@$(BUILD_DIR)/jtag_vpi --trace --timeout 300 --proto=auto
+
+# Interactive VPI simulation target (runs foreground, auto-detect protocol)
+vpi-sim: vpi-sim-auto
 
 # Automated VPI test target
 test-vpi: $(BUILD_DIR)/jtag_vpi client
@@ -260,6 +281,7 @@ test-jtag: $(BUILD_DIR)/jtag_vpi
 		echo "✓ VPI server started successfully"; \
 		echo ""; \
 		if [ -x "./openocd/test_openocd.sh" ]; then \
+			echo "Server mode: JTAG (modern jtag_vpi)"; \
 			if ./openocd/test_openocd.sh jtag; then \
 				echo ""; \
 				echo "✓ OpenOCD JTAG test PASSED"; \
@@ -299,6 +321,7 @@ test-cjtag: $(BUILD_DIR)/jtag_vpi
 		echo "✓ VPI server started successfully"; \
 		echo ""; \
 		if [ -x "./openocd/test_openocd.sh" ]; then \
+			echo "Server mode: cJTAG (modern jtag_vpi)"; \
 			if ./openocd/test_openocd.sh cjtag; then \
 				echo ""; \
 				echo "✓ OpenOCD cJTAG test PASSED"; \
@@ -316,7 +339,50 @@ test-cjtag: $(BUILD_DIR)/jtag_vpi
 			exit 1; \
 		fi
 	@echo ""
+
+test-jtag-legacy: $(BUILD_DIR)/jtag_vpi
+	@echo ""
+	@echo "=== Automated Legacy Protocol Test ==="
+	@echo "Testing 8-byte command format backward compatibility"
+	@pkill -9 jtag_vpi 2>/dev/null || true
+	@sleep 1
+	@echo "Starting VPI server in legacy protocol mode..."
+	@$(BUILD_DIR)/jtag_vpi --trace --timeout 60 --proto=legacy > vpi_legacy.log 2>&1 & \
+		SERVER_PID=$$!; \
+		echo "VPI server PID: $$SERVER_PID"; \
+		sleep 3; \
+		if ! kill -0 $$SERVER_PID 2>/dev/null; then \
+			echo "✗ VPI server failed to start"; \
+			echo "Check vpi_legacy.log for details"; \
+			exit 1; \
+		fi; \
+		echo "✓ VPI server started in legacy mode"; \
+		echo ""; \
+		echo "Compiling legacy protocol tests..."; \
+		gcc -o openocd/test_legacy_protocol openocd/test_legacy_protocol.c || { \
+			echo "✗ Test compilation failed"; \
+			kill $$SERVER_PID 2>/dev/null; \
+			exit 1; \
+		}; \
+		echo "✓ Tests compiled"; \
+		echo ""; \
+		echo "Server mode: legacy-only"; \
+		echo "Running legacy protocol test suite..."; \
+		if ./openocd/test_legacy_protocol; then \
+			echo ""; \
+			echo "✓ LEGACY PROTOCOL TEST PASSED"; \
+			echo "All 10 tests completed successfully"; \
+			kill $$SERVER_PID 2>/dev/null; \
+			exit 0; \
+		else \
+			echo ""; \
+			echo "✗ LEGACY PROTOCOL TEST FAILED"; \
+			kill $$SERVER_PID 2>/dev/null; \
+			exit 1; \
+		fi
+	@echo ""
 	@echo "View waveforms: gtkwave jtag_vpi.fst"
-	@echo "Server log: vpi_cjtag.log"
+	@echo "Server log: vpi_legacy.log"
+
 
 

@@ -9,15 +9,15 @@ import jtag_dmi_pkg::*;
 module jtag_dtm (
     input  logic                    clk,
     input  logic                    rst_n,
-    
+
     // JTAG TAP interface
     input  logic                    tdi,
     output logic                    tdo,
     input  logic                    shift_dr,
     input  logic                    update_dr,
     input  logic                    capture_dr,
-    input  logic [7:0]              ir_out,
-    
+    input  logic [4:0]              ir_out,
+
     // DMI interface to Debug Module
     output logic [DMI_ADDR_WIDTH-1:0] dmi_addr,
     output logic [DMI_DATA_WIDTH-1:0] dmi_wdata,
@@ -26,43 +26,43 @@ module jtag_dtm (
     input  logic [1:0]                dmi_resp,    // dmi_resp_e
     output logic                      dmi_req_valid,
     input  logic                      dmi_req_ready,
-    
+
     // IDCODE output
     output logic [31:0]             idcode
 );
 
     // JTAG instruction codes
-    localparam [7:0] IR_IDCODE  = 8'h01;
-    localparam [7:0] IR_DTMCS   = 8'h10;  // DTM Control and Status
-    localparam [7:0] IR_DMI     = 8'h11;  // Debug Module Interface
-    localparam [7:0] IR_BYPASS  = 8'hFF;
+    localparam [4:0] IR_IDCODE  = 5'h01;
+    localparam [4:0] IR_DTMCS   = 5'h10;  // DTM Control and Status
+    localparam [4:0] IR_DMI     = 5'h11;  // Debug Module Interface
+    localparam [4:0] IR_BYPASS  = 5'h1F;
 
     // IDCODE register value
     localparam [31:0] IDCODE_VALUE = 32'h1DEAD3FF;
-    
+
     // DTMCS register fields (32-bit)
     logic [31:0] dtmcs_reg;
     localparam [3:0]  DTMCS_VERSION    = 4'h1;     // Debug spec version 0.13
     localparam [5:0]  DTMCS_ABITS      = 6'd7;     // DMI address bits
     localparam [2:0]  DTMCS_IDLE       = 3'd1;     // Required idle cycles
-    
+
     // DMI register (41-bit: 7-bit addr + 32-bit data + 2-bit op)
     logic [40:0] dmi_reg;
     logic [40:0] dmi_shift_reg;
-    
+
     // IDCODE shift register
     logic [31:0] idcode_shift_reg;
-    
+
     // Bypass register
     logic bypass_reg;
-    
+
     // Current operation tracking
     logic dmi_pending;
     logic [1:0] last_response;  // dmi_resp_e
 
     // IDCODE assignment
     assign idcode = IDCODE_VALUE;
-    
+
     // Build DTMCS register
     always_comb begin
         dtmcs_reg = 32'h0;
@@ -93,7 +93,7 @@ module jtag_dtm (
                 last_response <= dmi_resp;
                 dmi_pending <= 1'b0;
             end
-            
+
             // Capture DR - load appropriate register
             if (capture_dr) begin
                 case (ir_out)
@@ -117,7 +117,7 @@ module jtag_dtm (
                     end
                 endcase
             end
-            
+
             // Shift DR - shift data through
             if (shift_dr) begin
                 case (ir_out)
@@ -135,7 +135,7 @@ module jtag_dtm (
                     end
                 endcase
             end
-            
+
             // Update DR - commit DMI operation
             if (update_dr && ir_out == IR_DMI) begin
                 dmi_reg <= dmi_shift_reg;

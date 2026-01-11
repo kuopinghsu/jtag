@@ -8,7 +8,7 @@ module jtag_tap_controller (
     input  logic       rst_n,
     input  logic       tms,      // Test Mode Select
     output logic [3:0] state,    // Current TAP state (for visibility)
-    
+
     // Control signals to shift registers
     output logic       shift_dr,
     output logic       shift_ir,
@@ -52,11 +52,11 @@ module jtag_tap_controller (
     // Next state logic
     always_comb begin
         next_state = current_state;
-        
+
         case (current_state)
             TEST_LOGIC_RESET: next_state = tms ? TEST_LOGIC_RESET : RUN_TEST_IDLE;
             RUN_TEST_IDLE:    next_state = tms ? DR_SELECT_SCAN : RUN_TEST_IDLE;
-            
+
             DR_SELECT_SCAN:   next_state = tms ? IR_SELECT_SCAN : DR_CAPTURE;
             DR_CAPTURE:       next_state = tms ? DR_EXIT1 : DR_SHIFT;
             DR_SHIFT:         next_state = tms ? DR_EXIT1 : DR_SHIFT;
@@ -64,7 +64,7 @@ module jtag_tap_controller (
             DR_PAUSE:         next_state = tms ? DR_EXIT2 : DR_PAUSE;
             DR_EXIT2:         next_state = tms ? DR_UPDATE : DR_SHIFT;
             DR_UPDATE:        next_state = tms ? DR_SELECT_SCAN : RUN_TEST_IDLE;
-            
+
             IR_SELECT_SCAN:   next_state = tms ? TEST_LOGIC_RESET : IR_CAPTURE;
             IR_CAPTURE:       next_state = tms ? IR_EXIT1 : IR_SHIFT;
             IR_SHIFT:         next_state = tms ? IR_EXIT1 : IR_SHIFT;
@@ -72,7 +72,7 @@ module jtag_tap_controller (
             IR_PAUSE:         next_state = tms ? IR_EXIT2 : IR_PAUSE;
             IR_EXIT2:         next_state = tms ? IR_UPDATE : IR_SHIFT;
             IR_UPDATE:        next_state = tms ? DR_SELECT_SCAN : RUN_TEST_IDLE;
-            
+
             default:          next_state = TEST_LOGIC_RESET;
         endcase
     end

@@ -2,7 +2,7 @@
  * Multi-TAP Scan Chain Controller
  * Supports multiple JTAG TAPs in a daisy-chain configuration
  * Implements bypass register management and TAP selection
- * 
+ *
  * Features:
  * - Up to 8 TAPs in a single chain
  * - Automatic bypass register insertion
@@ -24,13 +24,13 @@ module jtag_scan_chain #(
 )(
     input  logic        clk,
     input  logic        rst_n,
-    
+
     // Upstream JTAG signals (from jtag_interface)
     input  logic        tap_tck,
     input  logic        tap_tms,
     input  logic        tap_tdi,
     output logic        tap_tdo,
-    
+
     // TAP control signals
     input  logic        shift_dr,
     input  logic        shift_ir,
@@ -38,17 +38,17 @@ module jtag_scan_chain #(
     input  logic        capture_ir,
     input  logic        update_dr,
     input  logic        update_ir,
-    
+
     // Downstream TAP interfaces (to individual TAPs)
     output logic [NUM_TAPS-1:0] tap_tck_out,
     output logic [NUM_TAPS-1:0] tap_tms_out,
     output logic [NUM_TAPS-1:0] tap_tdi_out,
     input  logic [NUM_TAPS-1:0] tap_tdo_in,
-    
+
     // TAP selection and configuration
     input  logic [$clog2(NUM_TAPS)-1:0] selected_tap,   // Currently selected TAP
     output logic [NUM_TAPS-1:0]         tap_active,     // Active TAP indicators
-    
+
     // Chain status
     output logic [15:0]         total_ir_length,        // Total IR chain length
     output logic [15:0]         total_dr_length         // Total DR chain length (dynamic)
@@ -79,22 +79,22 @@ module jtag_scan_chain #(
             total_ir_length = total_ir_length + get_ir_length(i);
         end
     end
-    
+
     // Bypass registers for each TAP (used when TAP is not selected)
     logic [NUM_TAPS-1:0] bypass_reg;
-    
+
     // IR shift registers for chain management
     logic [MAX_IR_LENGTH-1:0] ir_shift_reg [NUM_TAPS];
-    
+
     // DR shift state tracking
     logic [15:0] shift_count;
     logic [15:0] pre_padding;   // Bits to shift before selected TAP
     logic [15:0] post_padding;  // Bits to shift after selected TAP
-    
+
     // =========================================================================
     // TAP Clock and Control Signal Distribution
     // =========================================================================
-    
+
     // All TAPs receive the same clock and TMS
     always_comb begin
         for (int i = 0; i < NUM_TAPS; i++) begin
@@ -102,27 +102,27 @@ module jtag_scan_chain #(
             tap_tms_out[i] = tap_tms;
         end
     end
-    
+
     // =========================================================================
     // TAP Selection and Active Indicators
     // =========================================================================
-    
+
     always_comb begin
         tap_active = '0;
         if (selected_tap < NUM_TAPS) begin
             tap_active[selected_tap] = 1'b1;
         end
     end
-    
+
     // =========================================================================
     // IR Scan Chain Management
     // =========================================================================
-    
+
     // Calculate pre and post padding for IR shifts
     always_comb begin
         pre_padding = 0;
         post_padding = 0;
-        
+
         // Pre-padding: sum of IR lengths before selected TAP
         for (int i = 0; i < NUM_TAPS; i++) begin
             if (i < selected_tap) begin
@@ -132,16 +132,16 @@ module jtag_scan_chain #(
             end
         end
     end
-    
+
     // =========================================================================
     // Data Shift Chain (IR and DR)
     // =========================================================================
-    
+
     logic tap_tdi_chain [NUM_TAPS+1];  // TDI chain: [0]=input, [NUM_TAPS]=output
-    
+
     // Chain input
     assign tap_tdi_chain[0] = tap_tdi;
-    
+
     // Chain connections between TAPs
     generate
         for (genvar i = 0; i < NUM_TAPS; i++) begin : g_chain
@@ -172,14 +172,14 @@ module jtag_scan_chain #(
             end
         end
     endgenerate
-    
+
     // Chain output
     assign tap_tdo = tap_tdi_chain[NUM_TAPS];
-    
+
     // =========================================================================
     // Bypass Register Management
     // =========================================================================
-    
+
     always_ff @(posedge tap_tck or negedge rst_n) begin
         if (!rst_n) begin
             bypass_reg <= '1;  // Bypass registers default to 1
@@ -200,14 +200,14 @@ module jtag_scan_chain #(
             end
         end
     end
-    
+
     // =========================================================================
     // IR Length Tracking
     // =========================================================================
-    
+
     // Track IR shifts for proper IR chain management
     logic [MAX_IR_LENGTH-1:0] ir_shift_count;
-    
+
     always_ff @(posedge tap_tck or negedge rst_n) begin
         if (!rst_n) begin
             ir_shift_count <= '0;
@@ -219,11 +219,11 @@ module jtag_scan_chain #(
             end
         end
     end
-    
+
     // =========================================================================
     // Dynamic DR Length Calculation
     // =========================================================================
-    
+
     // DR length is dynamic and depends on the current instruction
     // For simplicity, assume each non-selected TAP contributes 1 bit (bypass)
     always_comb begin

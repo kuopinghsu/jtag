@@ -1,7 +1,7 @@
 /**
  * cJTAG (IEEE 1149.7) Protocol Test Client
  * Tests actual OScan1 two-wire protocol operations
- * 
+ *
  * This test will FAIL until OpenOCD is patched to support cJTAG.
  * It verifies:
  * - Two-wire mode activation (TCKC/TMSC)
@@ -91,14 +91,14 @@ int connect_to_vpi() {
  */
 int test_two_wire_mode_detection() {
     print_test("Two-Wire Mode Detection (TCKC/TMSC vs TCK/TMS/TDI/TDO)");
-    
+
     print_info("cJTAG uses 2-wire mode: TCKC (clock) and TMSC (bidirectional data)");
     print_info("Standard JTAG uses 4-wire: TCK, TMS, TDI, TDO");
     print_info("OpenOCD jtag_vpi adapter only supports 4-wire mode");
-    
+
     print_fail("OpenOCD does not support two-wire OScan1 protocol");
     print_info("Required: OpenOCD must be patched with cJTAG/OScan1 support");
-    
+
     return 0;
 }
 
@@ -109,17 +109,17 @@ int test_two_wire_mode_detection() {
  */
 int test_oscan1_oac_sequence() {
     print_test("OScan1 Attention Character (OAC) - 16 TCKC edges");
-    
+
     print_info("OAC sequence: 16 consecutive TCKC edges triggers JScan mode");
     print_info("Hardware: oscan1_controller.sv detects OAC and enters command mode");
     print_info("Required: VPI client must send two-wire protocol sequences");
-    
+
     // This test requires sending actual two-wire sequences
     // Current OpenOCD jtag_vpi cannot do this
-    
+
     print_fail("Cannot send OAC - OpenOCD jtag_vpi uses 4-wire protocol");
     print_info("Need: Custom VPI adapter that supports TCKC/TMSC signaling");
-    
+
     return 0;
 }
 
@@ -129,14 +129,14 @@ int test_oscan1_oac_sequence() {
  */
 int test_jscan_command_oscan_on() {
     print_test("JScan Command - OSCAN_ON (0x1)");
-    
+
     print_info("JScan packet format: 4-bit command + parity/CRC");
     print_info("JSCAN_OSCAN_ON (0x1): Enable OScan1 mode");
     print_info("Must be sent via two-wire TMSC after OAC");
-    
+
     print_fail("Cannot send JScan commands - no two-wire support in OpenOCD");
     print_info("Hardware ready: oscan1_controller.sv can parse JScan commands");
-    
+
     return 0;
 }
 
@@ -146,14 +146,14 @@ int test_jscan_command_oscan_on() {
  */
 int test_zero_insertion_deletion() {
     print_test("Zero Insertion/Deletion (Bit Stuffing)");
-    
+
     print_info("OScan1 protocol: After 5 consecutive 1s, insert a 0");
     print_info("Prevents false OAC detection (16 edges = 8 consecutive 1s)");
     print_info("Receiver must delete stuffed zeros");
-    
+
     print_fail("Cannot test bit stuffing - requires two-wire protocol client");
     print_info("Hardware ready: oscan1_controller.sv implements zero deletion");
-    
+
     return 0;
 }
 
@@ -163,15 +163,15 @@ int test_zero_insertion_deletion() {
  */
 int test_scanning_format_0() {
     print_test("Scanning Format 0 (SF0) - TMS/TDI Encoding");
-    
+
     print_info("SF0 encoding on two-wire TMSC:");
     print_info("  - TMS bit on TCKC rising edge");
     print_info("  - TDI bit on TCKC falling edge");
     print_info("  - TDO returned on TMSC when selected");
-    
+
     print_fail("Cannot test SF0 - OpenOCD doesn't encode JTAG to two-wire");
     print_info("Hardware ready: oscan1_controller.sv decodes SF0 to JTAG");
-    
+
     return 0;
 }
 
@@ -181,14 +181,14 @@ int test_scanning_format_0() {
  */
 int test_crc8_error_detection() {
     print_test("CRC-8 Error Detection (Optional)");
-    
+
     print_info("OScan1 CRC-8: Polynomial 0x07");
     print_info("Calculated over JScan packets and data transfers");
     print_info("Hardware tracks CRC errors in 16-bit counter");
-    
+
     print_fail("Cannot test CRC - no cJTAG packet support in OpenOCD");
     print_info("Hardware ready: cjtag_crc_parity.sv implements CRC-8");
-    
+
     return 0;
 }
 
@@ -198,7 +198,7 @@ int test_crc8_error_detection() {
  */
 int test_full_cjtag_tap_reset() {
     print_test("Full cJTAG TAP Reset via OScan1 Protocol");
-    
+
     print_info("Complete sequence:");
     print_info("  1. Send OAC (16 TCKC edges)");
     print_info("  2. Send JSCAN_OSCAN_ON (0x1)");
@@ -206,10 +206,10 @@ int test_full_cjtag_tap_reset() {
     print_info("  4. Select Scanning Format 0");
     print_info("  5. Send TMS=1 for 5 cycles (TAP reset)");
     print_info("  6. Read IDCODE via SF0");
-    
+
     print_fail("Cannot execute - OpenOCD lacks complete cJTAG protocol stack");
     print_info("Hardware ready: Full OScan1 implementation in oscan1_controller.sv");
-    
+
     return 0;
 }
 
@@ -219,25 +219,25 @@ int test_full_cjtag_tap_reset() {
  */
 int test_mode_select_flag() {
     print_test("Mode Select Flag Verification");
-    
+
     // Try to query mode via VPI command 0x03 (if it exists)
     struct vpi_cmd cmd;
     memset(&cmd, 0, sizeof(cmd));
     cmd.cmd = 0x03;  // Assuming SET_PORT or similar
     cmd.length = htonl(1);  // Set mode_select=1
-    
+
     fd_set writeset;
     struct timeval tv;
     tv.tv_sec = TIMEOUT_SEC;
     tv.tv_usec = 0;
-    
+
     FD_ZERO(&writeset);
     FD_SET(sock, &writeset);
-    
+
     if (select(sock + 1, NULL, &writeset, NULL, &tv) > 0) {
         if (send(sock, &cmd, sizeof(cmd), 0) == sizeof(cmd)) {
             print_info("Sent mode query to VPI server");
-            
+
             // Try to receive response
             struct vpi_resp resp;
             fd_set readset;
@@ -245,7 +245,7 @@ int test_mode_select_flag() {
             FD_SET(sock, &readset);
             tv.tv_sec = 1;
             tv.tv_usec = 0;
-            
+
             if (select(sock + 1, &readset, NULL, NULL, &tv) > 0) {
                 if (recv(sock, &resp, sizeof(resp), 0) == sizeof(resp)) {
                     if (resp.mode == 1) {
@@ -257,7 +257,7 @@ int test_mode_select_flag() {
             }
         }
     }
-    
+
     print_info("Cannot query mode - VPI protocol limitation");
     print_info("Simulation likely has mode_select=1, but OpenOCD doesn't use it");
     return 0;
@@ -284,7 +284,7 @@ int main(int argc, char** argv) {
     printf("HARDWARE STATUS: ✓ Ready (oscan1_controller.sv implemented)\n");
     printf("SOFTWARE STATUS: ✗ Not Ready (OpenOCD needs cJTAG patch)\n");
     printf("\n");
-    
+
     // Connect to VPI server
     printf("Connecting to VPI server at %s:%d...\n", VPI_ADDR, VPI_PORT);
     sock = connect_to_vpi();
@@ -294,13 +294,13 @@ int main(int argc, char** argv) {
         return 1;
     }
     printf("✓ Connected to VPI server\n");
-    
+
     // Run tests
     printf("\n");
     printf("═══════════════════════════════════════════════════════════════\n");
     printf("  Running cJTAG Protocol Tests\n");
     printf("═══════════════════════════════════════════════════════════════\n");
-    
+
     test_two_wire_mode_detection();
     test_oscan1_oac_sequence();
     test_jscan_command_oscan_on();
@@ -309,9 +309,9 @@ int main(int argc, char** argv) {
     test_crc8_error_detection();
     test_full_cjtag_tap_reset();
     test_mode_select_flag();
-    
+
     close(sock);
-    
+
     // Summary
     printf("\n");
     printf("═══════════════════════════════════════════════════════════════\n");
@@ -322,7 +322,7 @@ int main(int argc, char** argv) {
     printf("Passed:       %d\n", pass_count);
     printf("Failed:       %d\n", fail_count);
     printf("\n");
-    
+
     if (fail_count > 0) {
         printf("═══════════════════════════════════════════════════════════════\n");
         printf("  ✗ cJTAG PROTOCOL TESTS FAILED (EXPECTED)\n");

@@ -247,6 +247,49 @@ uint32_t idcode = client.readIDCODE();  // Returns 0x1DEAD3FF
 client.setMode(MODE_CJTAG);
 ```
 
+### VPI Protocol Modes
+
+The VPI server supports two protocol formats with automatic detection:
+
+**OpenOCD jtag_vpi (1036-byte packets)**
+- Default for OpenOCD integration
+- Full-size fixed packets with TMS/TDI/TDO buffers
+- Commands: RESET, TMS_SEQ, SCAN_CHAIN, SCAN_CHAIN_FLIP_TMS
+- Little-endian field encoding
+
+**Legacy 8-byte protocol**
+- Simple test client format
+- Single 8-byte command header
+- For backward compatibility and custom clients
+
+**Auto-detection**
+- Server detects protocol at connection time
+- >8 bytes in first read → OpenOCD mode
+- Exactly 8 bytes in first read → Legacy mode
+
+**Force protocol via CLI:**
+```bash
+# Auto-detect (default)
+./build/jtag_vpi
+
+# Force OpenOCD mode
+./build/jtag_vpi --proto=openocd
+
+# Force legacy mode
+./build/jtag_vpi --proto=legacy
+
+# Other options
+./build/jtag_vpi --help
+```
+
+**Makefile targets by protocol:**
+```bash
+make vpi-sim              # Start with auto-detect (default)
+make vpi-sim-openocd      # Start with OpenOCD protocol forced
+make vpi-sim-legacy       # Start with legacy protocol forced
+make vpi-sim-auto         # Explicitly use auto-detect
+```
+
 ## OpenOCD Integration
 
 ### Configuration

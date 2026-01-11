@@ -1,7 +1,7 @@
 /**
  * cJTAG CRC and Parity Checker
  * Implements error detection for IEEE 1149.7 cJTAG protocol
- * 
+ *
  * Features:
  * - CRC-8 calculation for data packets
  * - Even/odd parity checking
@@ -16,28 +16,28 @@ module cjtag_crc_parity #(
 )(
     input  logic        clk,
     input  logic        rst_n,
-    
+
     // Data input interface
     input  logic [7:0]  data_in,       // Input data byte
     input  logic        data_valid,    // Data valid strobe
     input  logic        data_last,     // Last byte in packet
-    
+
     // CRC interface
     output logic [7:0]  crc_value,     // Computed CRC value
     input  logic [7:0]  crc_expected,  // Expected CRC from packet
     input  logic        crc_check,     // Check CRC strobe
     output logic        crc_error,     // CRC mismatch detected
-    
+
     // Parity interface
     output logic        parity_bit,    // Computed parity bit
     input  logic        parity_expected, // Expected parity
     input  logic        parity_check,  // Check parity strobe
     output logic        parity_error,  // Parity mismatch detected
-    
+
     // Error statistics
     output logic [15:0] crc_error_count,
     output logic [15:0] parity_error_count,
-    
+
     // Control
     input  logic        clear_errors   // Clear error counters
 );
@@ -45,10 +45,10 @@ module cjtag_crc_parity #(
     // =========================================================================
     // CRC-8 Calculation
     // =========================================================================
-    
+
     logic [7:0] crc_reg;
     logic [7:0] crc_next;
-    
+
     // CRC-8 calculation (polynomial: x^8 + x^2 + x + 1)
     function automatic logic [7:0] crc8_update(
         input logic [7:0] crc_in,
@@ -63,10 +63,10 @@ module cjtag_crc_parity #(
         logic [7:0] crc6;
         logic [7:0] crc7;
         logic [7:0] crc8;
-        
+
         // Initialize
         crc0 = crc_in ^ data;
-        
+
         // Manually unroll 8 iterations
         crc1 = crc0[7] ? ((crc0 << 1) ^ CRC_POLYNOMIAL) : (crc0 << 1);
         crc2 = crc1[7] ? ((crc1 << 1) ^ CRC_POLYNOMIAL) : (crc1 << 1);
@@ -76,10 +76,10 @@ module cjtag_crc_parity #(
         crc6 = crc5[7] ? ((crc5 << 1) ^ CRC_POLYNOMIAL) : (crc5 << 1);
         crc7 = crc6[7] ? ((crc6 << 1) ^ CRC_POLYNOMIAL) : (crc6 << 1);
         crc8 = crc7[7] ? ((crc7 << 1) ^ CRC_POLYNOMIAL) : (crc7 << 1);
-        
+
         crc8_update = crc8;
     endfunction
-    
+
     // CRC register update
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -92,9 +92,9 @@ module cjtag_crc_parity #(
             end
         end
     end
-    
+
     assign crc_value = crc_reg;
-    
+
     // CRC error detection
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -107,18 +107,18 @@ module cjtag_crc_parity #(
             end
         end
     end
-    
+
     // =========================================================================
     // Parity Calculation
     // =========================================================================
-    
+
     logic parity_reg;
-    
+
     // Even parity calculation
     function logic calc_parity(input logic [7:0] data);
         calc_parity = ^data;  // XOR all bits
     endfunction
-    
+
     // Parity accumulator
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -131,9 +131,9 @@ module cjtag_crc_parity #(
             end
         end
     end
-    
+
     assign parity_bit = parity_reg;
-    
+
     // Parity error detection
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -146,11 +146,11 @@ module cjtag_crc_parity #(
             end
         end
     end
-    
+
     // =========================================================================
     // Error Statistics
     // =========================================================================
-    
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             crc_error_count <= 16'h0;

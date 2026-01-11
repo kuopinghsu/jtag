@@ -1,7 +1,7 @@
 /**
  * JTAG/cJTAG Protocol Test Client
  * Tests actual JTAG and cJTAG protocol operations via VPI interface
- * 
+ *
  * Simplified to match the actual VPI protocol used by jtag_vpi.c
  */
 
@@ -81,7 +81,7 @@ int send_vpi_command_timeout(int sock, jtag_cmd_t *cmd, jtag_resp_t *resp) {
     fd_set writeset, readset;
     struct timeval tv;
     int ret;
-    
+
     /* Setup timeout */
     tv.tv_sec = TIMEOUT_SEC;
     tv.tv_usec = 0;
@@ -96,8 +96,8 @@ int send_vpi_command_timeout(int sock, jtag_cmd_t *cmd, jtag_resp_t *resp) {
         fprintf(stderr, "[DEBUG] Write select timeout or error\n");
         return -1;  /* Timeout or error */
     }
-    
-    fprintf(stderr, "[DEBUG] Sending %zu bytes: cmd=0x%02x tms=%d tdi=%d\n", 
+
+    fprintf(stderr, "[DEBUG] Sending %zu bytes: cmd=0x%02x tms=%d tdi=%d\n",
             sizeof(*cmd), cmd->cmd, cmd->tms_val, cmd->tdi_val);
     ret = send(sock, cmd, sizeof(*cmd), 0);
     fprintf(stderr, "[DEBUG] Send returned: %d\n", ret);
@@ -111,7 +111,7 @@ int send_vpi_command_timeout(int sock, jtag_cmd_t *cmd, jtag_resp_t *resp) {
     FD_SET(sock, &readset);
     tv.tv_sec = TIMEOUT_SEC;
     tv.tv_usec = 0;
-    
+
     fprintf(stderr, "[DEBUG] Waiting for read ready (timeout %ds)...\n", TIMEOUT_SEC);
     sel = select(sock + 1, &readset, NULL, NULL, &tv);
     fprintf(stderr, "[DEBUG] Select returned: %d\n", sel);
@@ -119,7 +119,7 @@ int send_vpi_command_timeout(int sock, jtag_cmd_t *cmd, jtag_resp_t *resp) {
         fprintf(stderr, "[DEBUG] Read select timeout or error\n");
         return -1;  /* Timeout or error */
     }
-    
+
     fprintf(stderr, "[DEBUG] Receiving %zu bytes...\n", sizeof(*resp));
     ret = recv(sock, resp, sizeof(*resp), 0);
     fprintf(stderr, "[DEBUG] Recv returned: %d, response=0x%02x\n", ret, resp->response);
@@ -133,7 +133,7 @@ int send_vpi_command_timeout(int sock, jtag_cmd_t *cmd, jtag_resp_t *resp) {
 
 int test_jtag_reset(int sock) {
     print_test("JTAG TAP Reset (5 TMS=1 pulses)");
-    
+
     for (int i = 0; i < 5; i++) {
         jtag_cmd_t cmd;
         jtag_resp_t resp;
@@ -148,7 +148,7 @@ int test_jtag_reset(int sock) {
             print_fail("Could not send reset command");
             return 0;
         }
-        
+
         if (resp.response != 0x01) {
             printf("  (Response: 0x%02x)\n", resp.response);
         }
@@ -160,10 +160,10 @@ int test_jtag_reset(int sock) {
 
 int test_jtag_ir_scan(int sock) {
     print_test("JTAG IR Scan (load 0x01 IDCODE instruction)");
-    
+
     /* Shift in 0x01 instruction over 8 bits */
     unsigned char instruction = 0x01;
-    
+
     for (int bit = 0; bit < 8; bit++) {
         jtag_cmd_t cmd;
         jtag_resp_t resp;
@@ -186,22 +186,22 @@ int test_jtag_ir_scan(int sock) {
 
 int test_jtag_idcode(int sock) {
     print_test("JTAG Read IDCODE (via command 0x02)");
-    
+
     jtag_cmd_t cmd;
     jtag_resp_t resp;
     memset(&cmd, 0, sizeof(cmd));
     memset(&resp, 0, sizeof(resp));
 
     cmd.cmd = 0x02;  /* Read IDCODE command */
-    
+
     if (send_vpi_command_timeout(sock, &cmd, &resp) < 0) {
         print_fail("Could not send IDCODE read command");
         return 0;
     }
-    
+
     unsigned int idcode = *(unsigned int*)&resp.status;
     printf("  IDCODE: 0x%08X\n", idcode);
-    
+
     if (idcode == 0x1DEAD3FF) {
         print_pass("IDCODE matches expected value (0x1DEAD3FF)");
         return 1;
@@ -218,19 +218,19 @@ int test_jtag_idcode(int sock) {
 
 int test_mode_query(int sock) {
     print_test("Query Active Mode (JTAG vs cJTAG)");
-    
+
     jtag_cmd_t cmd;
     jtag_resp_t resp;
     memset(&cmd, 0, sizeof(cmd));
     memset(&resp, 0, sizeof(resp));
 
     cmd.cmd = 0x03;  /* Get active mode */
-    
+
     if (send_vpi_command_timeout(sock, &cmd, &resp) < 0) {
         print_fail("Could not query mode");
         return 0;
     }
-    
+
     const char *mode_str = resp.mode ? "cJTAG" : "JTAG";
     printf("  Active Mode: %s\n", mode_str);
     print_pass("Mode query successful");
@@ -239,7 +239,7 @@ int test_mode_query(int sock) {
 
 void run_jtag_tests(int sock) {
     printf("\n=== JTAG Protocol Tests ===\n\n");
-    
+
     test_jtag_reset(sock);
     test_jtag_ir_scan(sock);
     test_mode_query(sock);
@@ -248,7 +248,7 @@ void run_jtag_tests(int sock) {
 
 void run_cjtag_tests(int sock) {
     printf("\n=== cJTAG Protocol Tests ===\n\n");
-    
+
     test_mode_query(sock);
     test_jtag_reset(sock);
     test_jtag_ir_scan(sock);
@@ -257,7 +257,7 @@ void run_cjtag_tests(int sock) {
 
 int main(int argc, char **argv) {
     const char *mode = argc > 1 ? argv[1] : "jtag";
-    
+
     printf("\n=== JTAG/cJTAG Protocol Test Client ===\n");
     printf("Mode: %s\n", mode);
     printf("Target: %s:%d\n\n", VPI_ADDR, VPI_PORT);
