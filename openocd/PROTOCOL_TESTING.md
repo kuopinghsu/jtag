@@ -6,7 +6,7 @@ This document describes how to test the actual JTAG and cJTAG protocol operation
 
 The project provides two levels of testing:
 
-1. **Connectivity Testing** - Automated via `make test-openocd` and `make test-cjtag`
+1. **Connectivity Testing** - Automated via `make test-jtag` and `make test-cjtag`
    - Verifies OpenOCD can connect to VPI server
    - Tests OpenOCD initialization in respective modes
    - Validates TAP/JTAG interface detection
@@ -21,7 +21,7 @@ The project provides two levels of testing:
 
 ### JTAG Mode
 ```bash
-make test-openocd
+make test-jtag
 ```
 
 Expected output:
@@ -161,7 +161,7 @@ VPI Interface (vpi/jtag_vpi.c)
     
 External Tests
     ├── OpenOCD (via VPI adapter)
-    │   └── Used by: make test-openocd, make test-cjtag
+    │   └── Used by: make test-jtag, make test-cjtag
     │
     └── test_protocol (direct VPI client)
         ├── Used by: ./openocd/test_protocol jtag/cjtag
@@ -182,7 +182,7 @@ External Tests
 - Try restarting VPI server
 
 ### OpenOCD Connection Fails
-- Ensure VPI server is already running before test-openocd
+- Ensure VPI server is already running before test-jtag
 - Check OpenOCD version supports VPI adapter
 - Verify configuration files in `openocd/*.cfg`
 

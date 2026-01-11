@@ -596,7 +596,7 @@ Contributions welcome! Please check the TODO section above for priority areas.
 
 Before contributing:
 1. Review existing issues and documentation
-2. Run all tests: `make test-vpi test-openocd`
+2. Run all tests: `make test-vpi test-jtag`
 3. Verify synthesis: `make synth`
 4. Update documentation for any protocol/API changes
 

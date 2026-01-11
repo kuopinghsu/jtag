@@ -352,10 +352,10 @@ make test-vpi
 
 **Note**: The included `vpi/jtag_vpi_client.c` uses a different (older) 4-byte protocol and is incompatible with OpenOCD's 8-byte protocol. Use OpenOCD for integration testing.
 
-#### test-openocd
-Tests full OpenOCD integration:
+#### test-jtag
+Tests full OpenOCD JTAG integration:
 ```bash
-make test-openocd
+make test-jtag
 ```
 
 **What it tests**:
@@ -485,7 +485,7 @@ pkill -9 jtag_vpi
 pkill -9 openocd
 
 # Restart test
-make test-openocd
+make test-jtag
 ```
 
 ### Connection Timeout

@@ -8,7 +8,7 @@ The easiest way to test with OpenOCD:
 
 ```bash
 # Test JTAG mode (automated - builds, runs sim, tests with OpenOCD)
-make test-openocd
+make test-jtag
 
 # Test cJTAG mode (experimental - requires OScan1 support in OpenOCD)
 make test-cjtag
@@ -21,7 +21,7 @@ make test-vpi
 - **VPI Server**: ✅ Fully functional - accepts connections on port 3333
 - **JTAG TAP**: ✅ Hardware implemented and functional in simulation
 - **OpenOCD Integration**: ✅ Working - can read IDCODE, run telnet commands
-- **Automated Tests**: ✅ All passing (test-vpi, test-openocd)
+- **Automated Tests**: ✅ All passing (test-vpi, test-jtag)
 
 **cJTAG Testing Status**:
 - **Hardware**: ✅ Fully implemented (OScan1 controller, 2-wire operation)
@@ -103,7 +103,7 @@ Use the Makefile targets for automated testing:
 
 ```bash
 # JTAG mode test
-make test-openocd
+make test-jtag
 
 # cJTAG mode test  
 make test-cjtag
