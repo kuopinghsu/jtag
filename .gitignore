@@ -1,0 +1,5 @@
+*.fst*
+*.log
+build
+syn/results
+syn/reports
