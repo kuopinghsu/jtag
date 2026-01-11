@@ -49,8 +49,8 @@ help:
 	@echo "  make vpi-sim        - Run interactive VPI simulation (port 3333)"
 	@echo "  make client         - Build VPI client"
 	@echo "  make test-vpi       - Test VPI server and client (automatic)"
-	@echo "  make test-openocd   - Test with OpenOCD in JTAG mode (automatic)"
-	@echo "  make test-cjtag     - Test with OpenOCD in cJTAG mode (experimental)"
+	@echo "  make test-jtag      - Test JTAG mode with OpenOCD (automatic)"
+	@echo "  make test-cjtag     - Test cJTAG mode with OpenOCD (experimental)"
 	@echo "  make synth          - Synthesize all modules with ASAP7 PDK"
 	@echo "  make synth-jtag     - Synthesize JTAG top module only"
 	@echo "  make synth-reports  - Generate synthesis reports (area, timing, power)"
@@ -61,7 +61,7 @@ help:
 	@echo "  make system && make sim-system  (system integration test)"
 	@echo "  make verilator && make sim      (JTAG testbench)"
 	@echo "  make test-vpi                   (automated VPI test)"
-	@echo "  make test-openocd               (automated OpenOCD test)"
+	@echo "  make test-jtag                  (automated JTAG test)"
 	@echo "  make synth                      (ASAP7 synthesis)"
 
 verilator: $(BUILD_DIR)
@@ -231,7 +231,7 @@ test-vpi: $(BUILD_DIR)/jtag_vpi client
 		echo "Testing VPI client connection..."; \
 		echo "NOTE: Skipping incompatible VPI client test"; \
 		echo "The VPI client uses a different protocol than OpenOCD."; \
-		echo "Use 'make test-openocd' for full integration testing."; \
+			echo "Use 'make test-jtag' for full integration testing."; \
 		echo ""; \
 		echo "✓ VPI server test PASSED (server started successfully)"; \
 		kill $$SERVER_PID 2>/dev/null; \
@@ -240,9 +240,9 @@ test-vpi: $(BUILD_DIR)/jtag_vpi client
 	@echo "View waveforms: gtkwave jtag_vpi.fst"
 
 # OpenOCD testing targets
-test-openocd: $(BUILD_DIR)/jtag_vpi
+test-jtag: $(BUILD_DIR)/jtag_vpi
 	@echo ""
-	@echo "=== Automated OpenOCD JTAG Mode Test ==="
+	@echo "=== Automated JTAG Mode Test ==="
 	@echo "Cleaning up any previous VPI servers..."
 	@pkill -9 jtag_vpi openocd 2>/dev/null || true
 	@sleep 1
