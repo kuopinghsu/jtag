@@ -167,10 +167,42 @@ if [ -f "$LOG_FILE" ]; then
 fi
 
 # ============================================================
-# cJTAG PROTOCOL TESTING (if in cJTAG mode)
+# PROTOCOL TESTING
 # ============================================================
 
-CJTAG_PROTOCOL_RESULT=0
+PROTOCOL_RESULT=0
+
+if [ "$MODE" == "jtag" ]; then
+    echo ""
+    echo "=== JTAG Protocol Testing ==="
+    
+    # Compile JTAG protocol test if needed
+    JTAG_TEST="$SCRIPT_DIR/test_jtag_protocol"
+    JTAG_SRC="$SCRIPT_DIR/test_jtag_protocol.c"
+    
+    if [ ! -f "$JTAG_TEST" ] && [ -f "$JTAG_SRC" ]; then
+        echo "Compiling JTAG protocol test..."
+        gcc -o "$JTAG_TEST" "$JTAG_SRC" 2>/dev/null || {
+            echo "  ⚠ Could not compile JTAG test (gcc required)"
+            JTAG_TEST=""
+        }
+    fi
+    
+    if [ -x "$JTAG_TEST" ]; then
+        # Kill OpenOCD to free VPI connection
+        pkill -P $OPENOCD_PID openocd 2>/dev/null || true
+        kill $OPENOCD_PID 2>/dev/null || true
+        wait $OPENOCD_PID 2>/dev/null || true
+        sleep 2
+        
+        # Run JTAG protocol test
+        "$JTAG_TEST"
+        PROTOCOL_RESULT=$?
+    else
+        echo "⚠ JTAG protocol test not available (gcc not found)"
+        PROTOCOL_RESULT=0
+    fi
+fi
 
 if [ "$MODE" == "cjtag" ]; then
     echo ""
@@ -197,10 +229,10 @@ if [ "$MODE" == "cjtag" ]; then
         
         # Run cJTAG protocol test
         "$CJTAG_TEST"
-        CJTAG_PROTOCOL_RESULT=$?
+        PROTOCOL_RESULT=$?
     else
         echo "⚠ cJTAG protocol test not available (gcc not found)"
-        CJTAG_PROTOCOL_RESULT=0
+        PROTOCOL_RESULT=0
     fi
 fi
 
@@ -212,11 +244,33 @@ echo ""
 echo "=== Final Test Summary ==="
 echo "OpenOCD connectivity: $([ $OPENOCD_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
 
-if [ "$MODE" == "cjtag" ]; then
-    echo "cJTAG protocol:       $([ $CJTAG_PROTOCOL_RESULT -eq 0 ] && echo "PASS" || echo "FAIL (EXPECTED)")"
+if [ "$MODE" == "jtag" ]; then
+    echo "JTAG protocol:        $([ $PROTOCOL_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
+    
+    # For JTAG mode, require both connectivity AND protocol tests to pass
+    if [ $OPENOCD_RESULT -eq 0 ] && [ $PROTOCOL_RESULT -eq 0 ]; then
+        echo ""
+        echo "✓ ALL TESTS PASSED"
+        RESULT=0
+    else
+        echo ""
+        echo "✗ SOME TESTS FAILED"
+        echo ""
+        if [ $OPENOCD_RESULT -ne 0 ]; then
+            echo "  ✗ OpenOCD connectivity failed"
+        fi
+        if [ $PROTOCOL_RESULT -ne 0 ]; then
+            echo "  ✗ JTAG protocol tests failed"
+            echo ""
+            echo "Check VPI server implementation and logs"
+        fi
+        RESULT=1
+    fi
+elif [ "$MODE" == "cjtag" ]; then
+    echo "cJTAG protocol:       $([ $PROTOCOL_RESULT -eq 0 ] && echo "PASS" || echo "FAIL (EXPECTED)")"
     
     # For cJTAG mode, require both connectivity AND protocol tests to pass
-    if [ $OPENOCD_RESULT -eq 0 ] && [ $CJTAG_PROTOCOL_RESULT -eq 0 ]; then
+    if [ $OPENOCD_RESULT -eq 0 ] && [ $PROTOCOL_RESULT -eq 0 ]; then
         echo ""
         echo "✓ ALL TESTS PASSED - OpenOCD has cJTAG support!"
         RESULT=0
@@ -241,7 +295,7 @@ if [ "$MODE" == "cjtag" ]; then
         RESULT=1
     fi
 else
-    # JTAG mode - just check OpenOCD connectivity
+    # No protocol testing for unknown modes
     if [ $OPENOCD_RESULT -eq 0 ]; then
         echo ""
         echo "✓ ALL TESTS PASSED"
