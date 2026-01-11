@@ -8,27 +8,43 @@ This document summarizes the current status of JTAG and cJTAG testing.
 
 ### ✅ make test-jtag: PASSES
 ```
-Tests: 4/4 OpenOCD connectivity tests
+Tests: 4 connectivity + 8 protocol = 12 total
 Status: ✓ All tests pass
 ```
 
 **What it tests:**
+
+*Connectivity Tests (4):*
 1. VPI adapter connection
 2. OpenOCD initialization
 3. JTAG interface detection
 4. Telnet interface responsiveness
 
-**Why it passes:** Standard 4-wire JTAG protocol is fully supported by OpenOCD's jtag_vpi adapter.
+*Protocol Tests (8):*
+1. VPI server connection
+2. JTAG TAP reset (CMD_RESET)
+3. Scan operations (CMD_SCAN with TMS/TDI/TDO)
+4. Port configuration (CMD_SET_PORT)
+5. Multiple TAP reset cycles
+6. Invalid command handling
+7. Large scan operation (32 bits)
+8. Rapid command sequence (stress test)
+
+**Why it passes:** Standard 4-wire JTAG protocol is fully supported by OpenOCD's jtag_vpi adapter, and the VPI server correctly implements the OpenOCD jtag_vpi protocol (8-byte commands).
 
 ---
 
 ### ❌ make test-cjtag: FAILS (Expected)
 ```
-Tests: 8 cJTAG protocol tests
-Status: ✗ 7 failures, 0 passes
+Tests: 4 connectivity + 8 protocol = 12 total
+Status: ✓ 4/4 connectivity pass, ✗ 7/8 protocol fail
 ```
 
 **What it tests:**
+
+*Connectivity Tests (4):* Same as JTAG mode - all pass
+
+*Protocol Tests (8):*
 1. Two-wire mode detection (TCKC/TMSC vs TCK/TMS/TDI/TDO)
 2. OScan1 Attention Character (OAC) - 16 TCKC edges
 3. JScan command sequences (OSCAN_ON, SELECT, etc.)
@@ -38,7 +54,7 @@ Status: ✗ 7 failures, 0 passes
 7. Full cJTAG TAP reset sequence
 8. Mode select flag verification
 
-**Why it fails:** OpenOCD's jtag_vpi adapter does not support IEEE 1149.7 OScan1 two-wire protocol.
+**Why it fails:** OpenOCD's jtag_vpi adapter does not support IEEE 1149.7 OScan1 two-wire protocol. It connects using standard 4-wire JTAG, not cJTAG.
 
 ## Hardware vs Software Status
 
