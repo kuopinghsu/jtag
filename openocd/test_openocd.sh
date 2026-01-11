@@ -167,55 +167,21 @@ if [ -f "$LOG_FILE" ]; then
 fi
 
 # ============================================================
-# PROTOCOL TESTS: Test actual JTAG/cJTAG protocol operations
+# PROTOCOL TESTING NOTE
 # ============================================================
-
+# Protocol-level JTAG/cJTAG testing is available via test_protocol client:
+#   ./openocd/test_protocol jtag    (test JTAG protocol)
+#   ./openocd/test_protocol cjtag   (test cJTAG protocol)
+#
+# Note: Protocol tests must be run while VPI server is running
+# (cannot run simultaneously with OpenOCD due to single-client limitation)
+#
+# See openocd/test_protocol.c for implementation details
 echo ""
 echo "=== Protocol Testing ==="
-
-# Compile protocol test if needed
-PROTOCOL_TEST="$SCRIPT_DIR/test_protocol"
-PROTOCOL_SRC="$SCRIPT_DIR/test_protocol.c"
-
-if [ ! -f "$PROTOCOL_TEST" ] && [ -f "$PROTOCOL_SRC" ]; then
-    echo "Compiling protocol test client..."
-    gcc -o "$PROTOCOL_TEST" "$PROTOCOL_SRC" 2>/dev/null || {
-        echo "  ⚠ Could not compile protocol test (gcc required)"
-        PROTOCOL_TEST=""
-    }
-fi
-
-PROTOCOL_RESULT=1
-
-if [ -x "$PROTOCOL_TEST" ]; then
-    echo ""
-    echo "Testing $MODE protocol operations..."
-    
-    # Create a timeout wrapper to ensure test doesn't hang
-    timeout 8 "$PROTOCOL_TEST" "$MODE" > /tmp/protocol_test.log 2>&1
-    PROTOCOL_EXIT=$?
-    
-    if [ $PROTOCOL_EXIT -eq 0 ]; then
-        echo "✓ PROTOCOL TESTS PASSED"
-        PROTOCOL_RESULT=0
-        cat /tmp/protocol_test.log
-    elif [ $PROTOCOL_EXIT -eq 124 ]; then
-        echo "⚠ Protocol test timed out (VPI may have issues)"
-        PROTOCOL_RESULT=0  # Don't fail on timeout - VPI can be finicky
-        echo "  (Assuming VPI protocol limitations)"
-    else
-        echo "✗ Protocol tests failed"
-        PROTOCOL_RESULT=1
-        cat /tmp/protocol_test.log | tail -30
-    fi
-else
-    echo "⚠ Protocol test client not available"
-    echo "  (gcc not installed or compilation failed)"
-    PROTOCOL_RESULT=0  # Don't fail if protocol test unavailable
-fi
-
-# Cleanup
-rm -f /tmp/protocol_test.log
+echo "Note: Protocol tests available via ./openocd/test_protocol"
+echo "  Run: ./openocd/test_protocol jtag  (while VPI sim is active)"
+echo "  Or:  ./openocd/test_protocol cjtag"
 
 # ============================================================
 # FINAL RESULT
@@ -224,9 +190,14 @@ rm -f /tmp/protocol_test.log
 echo ""
 echo "=== Final Test Summary ==="
 echo "OpenOCD connectivity: $([ $OPENOCD_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
-echo "JTAG/cJTAG protocol: $([ $PROTOCOL_RESULT -eq 0 ] && echo "PASS" || echo "FAIL")"
+echo ""
+echo "For protocol-level testing, run:"
+echo "  make vpi-sim &"
+echo "  sleep 2"
+echo "  ./openocd/test_protocol jtag"
+echo "  pkill -f vpi"
 
-# Overall pass if OpenOCD connectivity works
+# Overall pass based on OpenOCD connectivity
 RESULT=$OPENOCD_RESULT
 
 # Cleanup
