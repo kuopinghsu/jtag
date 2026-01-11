@@ -1,6 +1,6 @@
 # JTAG/cJTAG SystemVerilog Project Makefile
 
-.PHONY: all clean verilator vpi sim client help test-vpi synth synth-jtag synth-reports synth-clean
+.PHONY: all clean verilator vpi sim client help test-vpi synth synth-jtag synth-reports synth-clean clean-tests
 
 # Directories
 SRC_DIR := src
@@ -55,7 +55,8 @@ help:
 	@echo "  make synth-jtag     - Synthesize JTAG top module only"
 	@echo "  make synth-reports  - Generate synthesis reports (area, timing, power)"
 	@echo "  make synth-clean    - Clean synthesis artifacts"
-	@echo "  make clean          - Clean all build artifacts"
+	@echo "  make clean          - Clean all build artifacts (keeps test executables)"
+	@echo "  make clean-tests    - Clean test executables in openocd/"
 	@echo ""
 	@echo "Quick start:"
 	@echo "  make system && make sim-system  (system integration test)"
@@ -107,7 +108,14 @@ clean: synth-clean
 	@echo "Cleaning build artifacts..."
 	@rm -rf $(BUILD_DIR)
 	@rm -f *.fst *.vcd *.fst.hier *.log
+	@echo "Note: Keeping test executables in openocd/ directory"
 	@echo "✓ Clean complete"
+
+clean-tests:
+	@echo "Cleaning test executables..."
+	@rm -f openocd/test_jtag_protocol openocd/test_cjtag_protocol openocd/test_protocol
+	@echo "✓ Test executables cleaned"
+	@echo "Note: Run 'make test-jtag' or 'make test-cjtag' to rebuild"
 
 synth-clean:
 	@echo "Cleaning synthesis artifacts..."
