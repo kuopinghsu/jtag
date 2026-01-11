@@ -54,66 +54,38 @@ Production-ready SystemVerilog implementation of IEEE 1149.1 JTAG and IEEE 1149.
 ## Directory Structure
 
 ```
-├── src/                           # Synthesizable source code
-│   ├── jtag/                      # JTAG/cJTAG core modules
-│   │   ├── jtag_dmi_pkg.sv               # DMI interface package (types & constants)
-│   │   ├── jtag_dtm.sv                   # Debug Transport Module (RISC-V Debug Spec)
-│   │   ├── jtag_top.sv                   # Top-level integration with DMI
-│   │   ├── jtag_interface.sv             # Physical interface & mode switching
-│   │   ├── oscan1_controller.sv          # Full OScan1 protocol state machine
-│   │   ├── jtag_tap_controller.sv        # TAP controller (IEEE 1149.1)
-│   │   ├── jtag_instruction_register.sv  # 8-bit instruction register
-│   │   ├── jtag_scan_chain.sv            # Multi-TAP scan chain controller
-│   │   └── cjtag_crc_parity.sv           # CRC-8 and parity error detection
-│   │
-│   ├── dbg/                       # Debug modules
-│   │   ├── riscv_debug_module.sv         # RISC-V Debug Module (full implementation)
-│   │   └── jtag_debug_unit.sv            # Legacy debug unit (deprecated)
-│   │
-│   └── system_top.sv              # System integration example
+├── src/                           # RTL source code
+│   ├── jtag/                      # JTAG/cJTAG core (8 modules)
+│   ├── dbg/                       # RISC-V Debug Module
+│   └── system_top.sv              # System integration
 │
 ├── tb/                            # Testbenches
-│   ├── system_tb.sv                      # System integration testbench
-│   └── jtag_tb.sv                        # JTAG standalone testbench
+│   ├── jtag_tb.sv                 # JTAG standalone
+│   └── system_tb.sv               # Full system integration
 │
-├── sim/                           # Simulation support (non-synthesizable)
-│   ├── jtag_vpi_top.sv                   # VPI wrapper module
-│   ├── sim_system_main.cpp               # System simulation driver
-│   ├── sim_main.cpp                      # JTAG simulation driver
-│   ├── sim_vpi_main.cpp                  # VPI simulation driver
-│   ├── jtag_vpi_server.cpp               # VPI TCP/IP server (port 3333)
-│   └── jtag_vpi_server.h                 # Server header
+├── sim/                           # Simulation infrastructure
+│   ├── jtag_vpi_top.sv            # VPI wrapper
+│   ├── jtag_vpi_server.cpp/h      # TCP server (port 3333)
+│   └── sim_*.cpp                  # Simulation drivers
 │
-├── vpi/                           # VPI client applications
-│   ├── jtag_vpi_client.c                 # Simple C client
-│   └── jtag_vpi_advanced.cpp             # Advanced C++ client API
+├── openocd/                       # OpenOCD integration
+│   ├── jtag.cfg / cjtag.cfg       # OpenOCD configurations
+│   ├── test_openocd.sh            # Automated test suite
+│   ├── test_jtag_protocol.c       # JTAG protocol validation
+│   ├── test_cjtag_protocol.c      # cJTAG protocol validation
+│   └── test.tcl                   # Interactive test script
 │
-├── openocd/                       # OpenOCD configuration & testing
-│   ├── README.md                         # OpenOCD integration guide
-│   ├── jtag.cfg                          # JTAG mode configuration
-│   ├── cjtag.cfg                         # cJTAG mode configuration
-│   ├── test.tcl                          # Interactive test script
-│   └── test_openocd.sh                   # Automated test script
+├── syn/                           # Synthesis (ASAP7 PDK)
+│   ├── scripts/                   # Yosys synthesis scripts
+│   └── results/                   # Netlists and reports
 │
-├── syn/                           # Synthesis setup (OSS CAD Suite + ASAP7 PDK)
-│   ├── scripts/                          # Yosys synthesis scripts
-│   ├── results/                          # Synthesis outputs (netlists, logs)
-│   ├── reports/                          # Area/timing reports
-│   ├── pdk/                              # ASAP7 PDK liberty files
-│   └── README.md                         # Synthesis documentation
+├── docs/                          # Technical documentation
+│   ├── OSCAN1_IMPLEMENTATION.md
+│   ├── RISCV_DEBUG_MODULE.md
+│   ├── MULTI_TAP_SCAN_CHAIN.md
+│   └── OPENOCD_CJTAG_PATCH_GUIDE.md
 │
-├── docs/                          # Documentation
-│   ├── OSCAN1_IMPLEMENTATION.md          # OScan1 protocol details
-│   ├── RISCV_DEBUG_MODULE.md             # Debug Module full reference
-│   ├── JTAG_MODULE_HIERARCHY.md          # Module hierarchy & architecture
-│   ├── MULTI_TAP_SCAN_CHAIN.md           # Multi-TAP daisy-chain support
-│   └── CJTAG_CRC_PARITY.md               # CRC/parity error detection
-│
-├── build/                         # Build artifacts (generated)
-│   └── obj_dir/                          # Verilator output
-│
-├── Makefile                       # Build system
-└── README.md                      # This file
+└── Makefile                       # Build system
 ```
 
 ## Quick Start
