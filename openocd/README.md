@@ -17,7 +17,7 @@ make test-cjtag
 make test-vpi
 ```
 
-**Testing Status**: 
+**Testing Status**:
 - **VPI Server**: ✅ Fully functional - accepts connections on port 3333
 - **JTAG TAP**: ✅ Hardware implemented and functional in simulation
 - **OpenOCD Integration**: ✅ Working - can read IDCODE, run telnet commands
@@ -62,7 +62,7 @@ These commands automatically:
    ```bash
    # macOS
    brew install open-ocd
-   
+
    # Ubuntu/Debian
    sudo apt-get install openocd
    ```
@@ -70,7 +70,7 @@ These commands automatically:
 2. **Running VPI simulation**:
    ```bash
    # In terminal 1 - start the simulation
-   cd /Users/kuoping/Projects/jtag
+   cd {PROJECT_DIR}
    make vpi-sim
    ```
 
@@ -105,7 +105,7 @@ Use the Makefile targets for automated testing:
 # JTAG mode test
 make test-jtag
 
-# cJTAG mode test  
+# cJTAG mode test
 make test-cjtag
 
 # VPI interface test only
@@ -266,10 +266,10 @@ targets
 
 ### "Simulation timeout reached"
 - **Cause**: VPI simulation reached its timeout limit (default: 300 seconds for interactive, 60 seconds for automated tests)
-- **Fix**: 
+- **Fix**:
   ```bash
   # Increase timeout for manual testing (both formats supported)
-  ./build/jtag_vpi --trace --timeout 600    # Space-separated  
+  ./build/jtag_vpi --trace --timeout 600    # Space-separated
   ./build/jtag_vpi --trace --timeout=3600   # Equals sign (1 hour)
   ```
 
@@ -279,18 +279,18 @@ targets
 
 ### "Error: Connection refused"
 - **Cause**: VPI server port not available
-- **Fix**: 
+- **Fix**:
   ```bash
   # Check if port is in use
   lsof -i:3333
-  
+
   # Kill existing process if needed
   lsof -ti:3333 | xargs kill
   ```
 
 ### "Error: IDCODE mismatch"
 - **Cause**: Wrong device or communication error
-- **Fix**: 
+- **Fix**:
   - Verify simulation is running correctly
   - Check waveforms for proper signal timing
   - Ensure mode_select is set correctly for JTAG/cJTAG
@@ -298,7 +298,7 @@ targets
 ### cJTAG Mode Not Working
 - **Cause**: Standard OpenOCD doesn't support cJTAG/OScan1 protocol
 - **Status**: cJTAG hardware design is implemented but requires OScan1-aware software
-- **Solution**: 
+- **Solution**:
   - The simulation supports cJTAG: start with `--cjtag` flag
   - For testing, use: `./build/jtag_vpi --cjtag --timeout 300`
   - Check waveforms to verify OScan1 state machine (gtkwave jtag_vpi.fst)

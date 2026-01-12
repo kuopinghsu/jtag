@@ -1,7 +1,7 @@
 /**
  * RISC-V Debug Module (Full Implementation)
  * Complete implementation of RISC-V Debug Specification 0.13.2
- * 
+ *
  * Features:
  * - Full DMI register set
  * - Abstract command support (register/memory access)
@@ -24,7 +24,7 @@ module riscv_debug_module #(
 (
     input  logic                    clk,
     input  logic                    rst_n,
-    
+
     // DMI interface from JTAG DTM
     input  logic [DMI_ADDR_WIDTH-1:0] dmi_addr,
     input  logic [DMI_DATA_WIDTH-1:0] dmi_wdata,
@@ -33,7 +33,7 @@ module riscv_debug_module #(
     output logic [1:0]                dmi_resp,    // dmi_resp_e
     input  logic                      dmi_req_valid,
     output logic                      dmi_req_ready,
-    
+
     // Hart (hardware thread) interface
     output logic [NUM_HARTS-1:0] hart_reset_req,
     output logic [NUM_HARTS-1:0] hart_halt_req,
@@ -42,7 +42,7 @@ module riscv_debug_module #(
     input  logic [NUM_HARTS-1:0] hart_running,
     input  logic [NUM_HARTS-1:0] hart_unavailable,
     input  logic [NUM_HARTS-1:0] hart_havereset,
-    
+
     // Hart debug interface (GPR/CSR access)
     output logic [4:0]          hart_gpr_addr,
     output logic [31:0]         hart_gpr_wdata,
@@ -52,13 +52,13 @@ module riscv_debug_module #(
     output logic [31:0]         hart_csr_wdata,
     input  logic [31:0]         hart_csr_rdata,
     output logic                hart_csr_we,
-    
+
     // Program buffer execution interface
     output logic [31:0]         progbuf_insn,
     output logic                progbuf_insn_valid,
     input  logic                progbuf_insn_done,
     input  logic                progbuf_exception,
-    
+
     // System bus access (optional)
     output logic [63:0]         sb_address,
     output logic [63:0]         sb_wdata,
@@ -68,7 +68,7 @@ module riscv_debug_module #(
     output logic                sb_write_req,
     input  logic                sb_ready,
     input  logic                sb_error,
-    
+
     // Debug request output
     output logic                debug_req
 );
@@ -76,7 +76,7 @@ module riscv_debug_module #(
     // =========================================================================
     // Debug Module Register Map (RISC-V Debug Spec 0.13.2)
     // =========================================================================
-    
+
     // Core registers
     localparam [6:0] DM_DATA0        = 7'h04;  // Abstract Data 0
     localparam [6:0] DM_DATA1        = 7'h05;  // Abstract Data 1
@@ -90,7 +90,7 @@ module riscv_debug_module #(
     localparam [6:0] DM_DATA9        = 7'h0D;  // Abstract Data 9
     localparam [6:0] DM_DATA10       = 7'h0E;  // Abstract Data 10
     localparam [6:0] DM_DATA11       = 7'h0F;  // Abstract Data 11
-    
+
     localparam [6:0] DM_DMCONTROL    = 7'h10;  // Debug Module Control
     localparam [6:0] DM_DMSTATUS     = 7'h11;  // Debug Module Status
     localparam [6:0] DM_HARTINFO     = 7'h12;  // Hart Info
@@ -105,7 +105,7 @@ module riscv_debug_module #(
     localparam [6:0] DM_CONFSTRPTR2  = 7'h1B;  // Configuration String Pointer 2
     localparam [6:0] DM_CONFSTRPTR3  = 7'h1C;  // Configuration String Pointer 3
     localparam [6:0] DM_NEXTDM       = 7'h1D;  // Next Debug Module
-    
+
     // Program buffer
     localparam [6:0] DM_PROGBUF0     = 7'h20;  // Program Buffer 0
     localparam [6:0] DM_PROGBUF1     = 7'h21;  // Program Buffer 1
@@ -123,11 +123,11 @@ module riscv_debug_module #(
     localparam [6:0] DM_PROGBUF13    = 7'h2D;  // Program Buffer 13
     localparam [6:0] DM_PROGBUF14    = 7'h2E;  // Program Buffer 14
     localparam [6:0] DM_PROGBUF15    = 7'h2F;  // Program Buffer 15
-    
+
     // Authentication (optional)
     localparam [6:0] DM_AUTHDATA     = 7'h30;  // Authentication Data
     localparam [6:0] DM_DMCS2        = 7'h32;  // Debug Module Control and Status 2
-    
+
     // System bus access
     localparam [6:0] DM_SBCS         = 7'h38;  // System Bus Access Control and Status
     localparam [6:0] DM_SBADDRESS0   = 7'h39;  // System Bus Address 31:0
@@ -138,21 +138,21 @@ module riscv_debug_module #(
     localparam [6:0] DM_SBDATA1      = 7'h3D;  // System Bus Data 63:32
     localparam [6:0] DM_SBDATA2      = 7'h3E;  // System Bus Data 95:64
     localparam [6:0] DM_SBDATA3      = 7'h3F;  // System Bus Data 127:96
-    
+
     // Halt summary
     localparam [6:0] DM_HALTSUM2     = 7'h34;  // Halt Summary 2
     localparam [6:0] DM_HALTSUM3     = 7'h35;  // Halt Summary 3
-    
+
     // =========================================================================
     // Abstract Command Types
     // =========================================================================
-    
+
     typedef enum logic [7:0] {
         CMD_ACCESS_REG    = 8'h00,  // Access register (GPR/CSR/FPR)
         CMD_QUICK_ACCESS  = 8'h01,  // Quick access
         CMD_ACCESS_MEM    = 8'h02   // Access memory
     } cmd_type_e;
-    
+
     typedef enum logic [2:0] {
         CMD_ERR_NONE         = 3'h0,  // No error
         CMD_ERR_BUSY         = 3'h1,  // Abstract command in progress
@@ -162,11 +162,11 @@ module riscv_debug_module #(
         CMD_ERR_BUS          = 3'h5,  // Bus error
         CMD_ERR_OTHER        = 3'h7   // Other error
     } cmd_error_e;
-    
+
     // =========================================================================
     // Register Declarations
     // =========================================================================
-    
+
     // DMCONTROL register fields
     logic        dmcontrol_haltreq;
     logic        dmcontrol_resumereq;
@@ -179,7 +179,7 @@ module riscv_debug_module #(
     logic        dmcontrol_clrresethaltreq;
     logic        dmcontrol_ndmreset;
     logic        dmcontrol_dmactive;
-    
+
     // DMSTATUS register fields (read-only)
     logic        dmstatus_impebreak;
     logic        dmstatus_allhavereset;
@@ -199,34 +199,34 @@ module riscv_debug_module #(
     logic        dmstatus_hasresethaltreq;
     logic        dmstatus_confstrptrvalid;
     logic [3:0]  dmstatus_version;
-    
+
     // HARTINFO register
     logic [3:0]  hartinfo_nscratch;
     logic        hartinfo_dataaccess;
     logic [3:0]  hartinfo_datasize;
     logic [11:0] hartinfo_dataaddr;
-    
+
     // ABSTRACTCS register
     logic [4:0]  abstractcs_progbufsize;
     logic        abstractcs_busy;
     cmd_error_e  abstractcs_cmderr;
     logic [3:0]  abstractcs_datacount;
-    
+
     // ABSTRACTAUTO register
     logic [11:0] abstractauto_autoexecdata;
     logic [15:0] abstractauto_autoexecprogbuf;
-    
+
     // Abstract command register
     logic [31:0] command_reg;
     logic [7:0]  command_type;  // cmd_type_e enum, use logic for Yosys
     logic [23:0] command_control;
-    
+
     // Abstract data registers (12 entries)
     logic [31:0] data_reg [DATA_COUNT];
-    
+
     // Program buffer (16 entries)
     logic [31:0] progbuf [PROGBUF_SIZE];
-    
+
     // System bus control
     logic [2:0]  sbcs_sbaccess;
     logic        sbcs_sbautoincrement;
@@ -241,15 +241,15 @@ module riscv_debug_module #(
     logic [2:0]  sbcs_sbversion;
     logic        sbcs_sbbusy;
     logic        sbcs_sbreadonaddr;
-    
+
     // System bus address/data
     logic [63:0] sbaddress;
     logic [63:0] sbdata;
-    
+
     // Hart selection
     logic [19:0] hartsel;
     logic [4:0]  selected_hart_idx;
-    
+
     // Internal state
     typedef enum logic [2:0] {
         CMD_IDLE,
@@ -260,7 +260,7 @@ module riscv_debug_module #(
         CMD_EXEC_PROGBUF,
         CMD_COMPLETE
     } cmd_state_e;
-    
+
     cmd_state_e  cmd_state;
     logic [15:0] cmd_regno;
     logic        cmd_write;
@@ -269,30 +269,30 @@ module riscv_debug_module #(
     logic [2:0]  cmd_aarsize;
     logic        cmd_postincrement;
     logic [15:0] progbuf_pc;
-    
+
     // =========================================================================
     // Hart Selection Logic
     // =========================================================================
-    
+
     assign hartsel = {dmcontrol_hartselhi, dmcontrol_hartsello};
     assign selected_hart_idx = hartsel[4:0];  // Support up to 32 harts
-    
+
     // =========================================================================
     // DMI Response Handling
     // =========================================================================
-    
+
     assign dmi_req_ready = !abstractcs_busy;
     assign dmi_resp = abstractcs_busy ? DMI_RESP_BUSY : DMI_RESP_SUCCESS;
-    
+
     // =========================================================================
     // Hart Control Outputs
     // =========================================================================
-    
+
     always_comb begin
         hart_halt_req = '0;
         hart_resume_req = '0;
         hart_reset_req = '0;
-        
+
         if (dmcontrol_dmactive) begin
             if (dmcontrol_hasel) begin
                 // Hart array mask selection
@@ -317,18 +317,18 @@ module riscv_debug_module #(
             end
         end
     end
-    
+
     assign debug_req = |hart_halt_req;
-    
+
     // =========================================================================
     // DMSTATUS Fields (Dynamic based on selected hart)
     // =========================================================================
-    
+
     logic selected_hart_halted;
     logic selected_hart_running;
     logic selected_hart_unavailable;
     logic selected_hart_havereset;
-    
+
     generate
         if (NUM_HARTS == 1) begin : gen_single_hart
             assign selected_hart_halted = (selected_hart_idx < 5'(NUM_HARTS)) ? hart_halted[0] : 1'b0;
@@ -342,7 +342,7 @@ module riscv_debug_module #(
             assign selected_hart_havereset = (selected_hart_idx < 5'(NUM_HARTS)) ? hart_havereset[selected_hart_idx] : 1'b0;
         end
     endgenerate
-    
+
     assign dmstatus_impebreak = SUPPORT_IMPEBREAK;
     assign dmstatus_allhavereset = dmcontrol_hasel ? (&hart_havereset) : selected_hart_havereset;
     assign dmstatus_anyhavereset = dmcontrol_hasel ? (|hart_havereset) : selected_hart_havereset;
@@ -361,34 +361,34 @@ module riscv_debug_module #(
     assign dmstatus_hasresethaltreq = 1'b1;  // Support reset halt request
     assign dmstatus_confstrptrvalid = 1'b0;  // No config string
     assign dmstatus_version = 4'h2;  // Debug spec version 0.13
-    
+
     // =========================================================================
     // HARTINFO Fields
     // =========================================================================
-    
+
     assign hartinfo_nscratch = 4'h1;      // 1 scratch register (dscratch0)
     assign hartinfo_dataaccess = 1'b0;    // Data registers in memory (not CSR)
     assign hartinfo_datasize = 4'h1;      // 1 x 32-bit data register
     assign hartinfo_dataaddr = 12'h0;     // Base address (not used)
-    
+
     // =========================================================================
     // ABSTRACTCS Fields
     // =========================================================================
-    
+
     assign abstractcs_progbufsize = PROGBUF_SIZE[4:0];
     assign abstractcs_busy = (cmd_state != CMD_IDLE);
     assign abstractcs_datacount = DATA_COUNT[3:0];
-    
+
     // =========================================================================
     // System Bus Access Outputs
     // =========================================================================
-    
+
     assign sb_address = sbaddress;
     assign sb_wdata = sbdata;
     assign sb_size = sbcs_sbaccess;
     assign sbcs_sbbusy = !sb_ready;
     assign sbcs_sberror = sb_error;
-    
+
     // SB capabilities
     assign sbcs_sbversion = 3'h1;         // System bus version 1
     assign sbcs_sbasize = 7'd64;          // 64-bit address bus
@@ -397,14 +397,14 @@ module riscv_debug_module #(
     assign sbcs_sbaccess32 = 1'b1;        // 32-bit support
     assign sbcs_sbaccess16 = 1'b1;        // 16-bit support
     assign sbcs_sbaccess8 = 1'b1;         // 8-bit support
-    
+
     // =========================================================================
     // DMI Register Read
     // =========================================================================
-    
+
     always_comb begin
         dmi_rdata = 32'h0;
-        
+
         case (dmi_addr)
             // Abstract Data registers
             DM_DATA0:  dmi_rdata = data_reg[0];
@@ -419,7 +419,7 @@ module riscv_debug_module #(
             DM_DATA9:  dmi_rdata = data_reg[9];
             DM_DATA10: dmi_rdata = data_reg[10];
             DM_DATA11: dmi_rdata = data_reg[11];
-            
+
             // DMCONTROL register
             DM_DMCONTROL: begin
                 dmi_rdata[31]    = dmcontrol_haltreq;
@@ -434,7 +434,7 @@ module riscv_debug_module #(
                 dmi_rdata[1]     = dmcontrol_ndmreset;
                 dmi_rdata[0]     = dmcontrol_dmactive;
             end
-            
+
             // DMSTATUS register
             DM_DMSTATUS: begin
                 dmi_rdata[22]    = dmstatus_impebreak;
@@ -456,7 +456,7 @@ module riscv_debug_module #(
                 dmi_rdata[5:4]   = 2'b00;  // reserved
                 dmi_rdata[3:0]   = dmstatus_version;
             end
-            
+
             // HARTINFO register
             DM_HARTINFO: begin
                 dmi_rdata[23:20] = hartinfo_nscratch;
@@ -465,24 +465,24 @@ module riscv_debug_module #(
                 dmi_rdata[15:12] = hartinfo_datasize;
                 dmi_rdata[11:0]  = hartinfo_dataaddr;
             end
-            
+
             // HALTSUM1 register
             DM_HALTSUM1: begin
                 // Bits indicate which groups of 32 harts have at least one halted hart
                 dmi_rdata[0] = |hart_halted;
             end
-            
+
             // HAWINDOWSEL register
             DM_HAWINDOWSEL: begin
                 dmi_rdata = 32'h0;  // Single window (hawindowsel=0)
             end
-            
+
             // HAWINDOW register
             DM_HAWINDOW: begin
                 // Hart array window - bitmap of selected harts
                 dmi_rdata = {{(32-NUM_HARTS){1'b0}}, hart_halted};
             end
-            
+
             // ABSTRACTCS register
             DM_ABSTRACTCS: begin
                 dmi_rdata[28:24] = abstractcs_progbufsize;
@@ -493,19 +493,19 @@ module riscv_debug_module #(
                 dmi_rdata[7:4]   = 4'h0;   // reserved
                 dmi_rdata[3:0]   = abstractcs_datacount;
             end
-            
+
             // COMMAND register
             DM_COMMAND: begin
                 dmi_rdata = command_reg;
             end
-            
+
             // ABSTRACTAUTO register
             DM_ABSTRACTAUTO: begin
                 dmi_rdata[31:28] = 4'h0;  // reserved
                 dmi_rdata[27:16] = abstractauto_autoexecdata;
                 dmi_rdata[15:0]  = abstractauto_autoexecprogbuf;
             end
-            
+
             // CONFSTRPTR registers
             DM_CONFSTRPTR0,
             DM_CONFSTRPTR1,
@@ -513,12 +513,12 @@ module riscv_debug_module #(
             DM_CONFSTRPTR3: begin
                 dmi_rdata = 32'h0;  // No configuration string
             end
-            
+
             // NEXTDM register
             DM_NEXTDM: begin
                 dmi_rdata = 32'h0;  // No next debug module
             end
-            
+
             // Program buffer registers
             DM_PROGBUF0:  dmi_rdata = progbuf[0];
             DM_PROGBUF1:  dmi_rdata = progbuf[1];
@@ -536,17 +536,17 @@ module riscv_debug_module #(
             DM_PROGBUF13: dmi_rdata = progbuf[13];
             DM_PROGBUF14: dmi_rdata = progbuf[14];
             DM_PROGBUF15: dmi_rdata = progbuf[15];
-            
+
             // AUTHDATA register
             DM_AUTHDATA: begin
                 dmi_rdata = 32'h0;  // No authentication required
             end
-            
+
             // DMCS2 register
             DM_DMCS2: begin
                 dmi_rdata = 32'h0;  // reserved
             end
-            
+
             // SBCS register (System Bus Control and Status)
             DM_SBCS: begin
                 dmi_rdata[31:29] = sbcs_sbversion;
@@ -560,31 +560,31 @@ module riscv_debug_module #(
                 dmi_rdata[11:5]  = sbcs_sbasize;
                 dmi_rdata[4:0]   = 5'h0;   // reserved
             end
-            
+
             // SBADDRESS registers
             DM_SBADDRESS0: dmi_rdata = sbaddress[31:0];
             DM_SBADDRESS1: dmi_rdata = sbaddress[63:32];
             DM_SBADDRESS2: dmi_rdata = 32'h0;  // 96-bit address not supported
             DM_SBADDRESS3: dmi_rdata = 32'h0;  // 128-bit address not supported
-            
+
             // SBDATA registers
             DM_SBDATA0: dmi_rdata = sbdata[31:0];
             DM_SBDATA1: dmi_rdata = sbdata[63:32];
             DM_SBDATA2: dmi_rdata = 32'h0;  // 96-bit data not supported
             DM_SBDATA3: dmi_rdata = 32'h0;  // 128-bit data not supported
-            
+
             // HALTSUM2/3 registers
             DM_HALTSUM2: dmi_rdata = 32'h0;  // Not needed for <=32 harts
             DM_HALTSUM3: dmi_rdata = 32'h0;  // Not needed for <=32 harts
-            
+
             default: dmi_rdata = 32'h0;
         endcase
     end
-    
+
     // =========================================================================
     // DMI Register Write & Abstract Command Execution
     // =========================================================================
-    
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             // Reset all control registers
@@ -599,7 +599,7 @@ module riscv_debug_module #(
             dmcontrol_clrresethaltreq <= 1'b0;
             dmcontrol_ndmreset <= 1'b0;
             dmcontrol_dmactive <= 1'b0;
-            
+
             command_reg <= 32'h0;
             for (int i = 0; i < DATA_COUNT; i++) begin
                 data_reg[i] <= 32'h0;
@@ -607,26 +607,26 @@ module riscv_debug_module #(
             for (int i = 0; i < PROGBUF_SIZE; i++) begin
                 progbuf[i] <= 32'h0;
             end
-            
+
             abstractauto_autoexecdata <= 12'h0;
             abstractauto_autoexecprogbuf <= 16'h0;
-            
+
             sbcs_sbaccess <= 3'h2;  // Default to 32-bit
             sbcs_sbautoincrement <= 1'b0;
             sbcs_sbreadonaddr <= 1'b0;
             sbcs_sbreadondata <= 1'b0;
             sbaddress <= 64'h0;
             sbdata <= 64'h0;
-            
+
             cmd_state <= CMD_IDLE;
             abstractcs_cmderr <= CMD_ERR_NONE;
-            
+
             hart_gpr_we <= 1'b0;
             hart_csr_we <= 1'b0;
             progbuf_insn_valid <= 1'b0;
             sb_read_req <= 1'b0;
             sb_write_req <= 1'b0;
-            
+
         end else begin
             // Clear one-shot signals
             dmcontrol_resumereq <= 1'b0;
@@ -635,11 +635,11 @@ module riscv_debug_module #(
             progbuf_insn_valid <= 1'b0;
             sb_read_req <= 1'b0;
             sb_write_req <= 1'b0;
-            
+
             // =====================================================================
             // DMI Write Requests
             // =====================================================================
-            
+
             if (dmi_req_valid && dmi_op == DMI_OP_WRITE && dmcontrol_dmactive) begin
                 case (dmi_addr)
                     // DMCONTROL register
@@ -656,14 +656,14 @@ module riscv_debug_module #(
                         dmcontrol_ndmreset  <= dmi_wdata[1];
                         dmcontrol_dmactive  <= dmi_wdata[0];
                     end
-                    
+
                     // COMMAND register - Start abstract command
                     DM_COMMAND: begin
                         if (cmd_state == CMD_IDLE) begin
                             command_reg <= dmi_wdata;
                             command_type <= dmi_wdata[31:24];
                             command_control <= dmi_wdata[23:0];
-                            
+
                             // Check if hart is in correct state
                             if (!selected_hart_halted) begin
                                 abstractcs_cmderr <= CMD_ERR_HALT_RESUME;
@@ -678,7 +678,7 @@ module riscv_debug_module #(
                                         cmd_postexec <= dmi_wdata[18];
                                         cmd_aarsize <= dmi_wdata[22:20];
                                         cmd_postincrement <= dmi_wdata[19];
-                                        
+
                                         // Determine register type and start access
                                         if (dmi_wdata[15:0] < 16'h1000) begin
                                             // GPR access (x0-x31: 0x1000-0x101F)
@@ -696,18 +696,18 @@ module riscv_debug_module #(
                                             end
                                         end
                                     end
-                                    
+
                                     CMD_ACCESS_MEM: begin
                                         // Memory access command
                                         // Not fully implemented in this version
                                         abstractcs_cmderr <= CMD_ERR_NOT_SUPPORT;
                                     end
-                                    
+
                                     CMD_QUICK_ACCESS: begin
                                         // Quick access command
                                         abstractcs_cmderr <= CMD_ERR_NOT_SUPPORT;
                                     end
-                                    
+
                                     default: begin
                                         abstractcs_cmderr <= CMD_ERR_NOT_SUPPORT;
                                     end
@@ -718,20 +718,20 @@ module riscv_debug_module #(
                             abstractcs_cmderr <= CMD_ERR_BUSY;
                         end
                     end
-                    
+
                     // ABSTRACTCS register - Clear errors
                     DM_ABSTRACTCS: begin
                         if (dmi_wdata[10:8] != 3'h0) begin
                             abstractcs_cmderr <= CMD_ERR_NONE;
                         end
                     end
-                    
+
                     // ABSTRACTAUTO register
                     DM_ABSTRACTAUTO: begin
                         abstractauto_autoexecdata <= dmi_wdata[27:16];
                         abstractauto_autoexecprogbuf <= dmi_wdata[15:0];
                     end
-                    
+
                     // Abstract Data registers
                     DM_DATA0:  data_reg[0]  <= dmi_wdata;
                     DM_DATA1:  data_reg[1]  <= dmi_wdata;
@@ -745,7 +745,7 @@ module riscv_debug_module #(
                     DM_DATA9:  data_reg[9]  <= dmi_wdata;
                     DM_DATA10: data_reg[10] <= dmi_wdata;
                     DM_DATA11: data_reg[11] <= dmi_wdata;
-                    
+
                     // Program buffer registers
                     DM_PROGBUF0:  progbuf[0]  <= dmi_wdata;
                     DM_PROGBUF1:  progbuf[1]  <= dmi_wdata;
@@ -763,7 +763,7 @@ module riscv_debug_module #(
                     DM_PROGBUF13: progbuf[13] <= dmi_wdata;
                     DM_PROGBUF14: progbuf[14] <= dmi_wdata;
                     DM_PROGBUF15: progbuf[15] <= dmi_wdata;
-                    
+
                     // System bus control
                     DM_SBCS: begin
                         sbcs_sbaccess <= dmi_wdata[14:12];
@@ -773,7 +773,7 @@ module riscv_debug_module #(
                         // Writing 1 to sberror clears it
                         // Handled by sb_error input
                     end
-                    
+
                     // System bus address
                     DM_SBADDRESS0: begin
                         sbaddress[31:0] <= dmi_wdata;
@@ -784,7 +784,7 @@ module riscv_debug_module #(
                     DM_SBADDRESS1: begin
                         sbaddress[63:32] <= dmi_wdata;
                     end
-                    
+
                     // System bus data
                     DM_SBDATA0: begin
                         sbdata[31:0] <= dmi_wdata;
@@ -795,78 +795,78 @@ module riscv_debug_module #(
                     DM_SBDATA1: begin
                         sbdata[63:32] <= dmi_wdata;
                     end
-                    
+
                     default: ;
                 endcase
             end
-            
+
             // =====================================================================
             // Abstract Command Execution State Machine
             // =====================================================================
-            
+
             case (cmd_state)
                 CMD_IDLE: begin
                     // Waiting for command
                 end
-                
+
                 CMD_READ_GPR: begin
                     // Read GPR from hart
                     hart_gpr_addr <= cmd_regno[4:0];
                     hart_gpr_we <= 1'b0;
                     data_reg[0] <= hart_gpr_rdata;
-                    
+
                     if (cmd_postexec) begin
                         cmd_state <= CMD_EXEC_PROGBUF;
                     end else begin
                         cmd_state <= CMD_COMPLETE;
                     end
                 end
-                
+
                 CMD_WRITE_GPR: begin
                     // Write GPR to hart
                     hart_gpr_addr <= cmd_regno[4:0];
                     hart_gpr_wdata <= data_reg[0];
                     hart_gpr_we <= 1'b1;
-                    
+
                     if (cmd_postexec) begin
                         cmd_state <= CMD_EXEC_PROGBUF;
                     end else begin
                         cmd_state <= CMD_COMPLETE;
                     end
                 end
-                
+
                 CMD_READ_CSR: begin
                     // Read CSR from hart
                     hart_csr_addr <= cmd_regno[11:0];
                     hart_csr_we <= 1'b0;
                     data_reg[0] <= hart_csr_rdata;
-                    
+
                     if (cmd_postexec) begin
                         cmd_state <= CMD_EXEC_PROGBUF;
                     end else begin
                         cmd_state <= CMD_COMPLETE;
                     end
                 end
-                
+
                 CMD_WRITE_CSR: begin
                     // Write CSR to hart
                     hart_csr_addr <= cmd_regno[11:0];
                     hart_csr_wdata <= data_reg[0];
                     hart_csr_we <= 1'b1;
-                    
+
                     if (cmd_postexec) begin
                         cmd_state <= CMD_EXEC_PROGBUF;
                     end else begin
                         cmd_state <= CMD_COMPLETE;
                     end
                 end
-                
+
                 CMD_EXEC_PROGBUF: begin
                     // Execute program buffer
                     if (progbuf_pc < 16'(PROGBUF_SIZE)) begin
                         progbuf_insn <= progbuf[progbuf_pc[3:0]];  // PROGBUF_SIZE is 16, so 4 bits
                         progbuf_insn_valid <= 1'b1;
-                        
+
                         if (progbuf_insn_done) begin
                             if (progbuf_exception) begin
                                 abstractcs_cmderr <= CMD_ERR_EXCEPTION;
@@ -883,19 +883,19 @@ module riscv_debug_module #(
                         cmd_state <= CMD_COMPLETE;
                     end
                 end
-                
+
                 CMD_COMPLETE: begin
                     cmd_state <= CMD_IDLE;
                     progbuf_pc <= 16'h0;
                 end
-                
+
                 default: cmd_state <= CMD_IDLE;
             endcase
-            
+
             // =====================================================================
             // System Bus Access
             // =====================================================================
-            
+
             if (sb_ready && (sb_read_req || sb_write_req)) begin
                 if (sb_error) begin
                     // Bus error occurred
@@ -904,7 +904,7 @@ module riscv_debug_module #(
                     if (sb_read_req) begin
                         // Read completed, update sbdata
                         sbdata <= sb_rdata;
-                        
+
                         if (sbcs_sbautoincrement) begin
                             sbaddress <= sbaddress + (1 << sbcs_sbaccess);
                         end
@@ -913,7 +913,7 @@ module riscv_debug_module #(
                         if (sbcs_sbautoincrement) begin
                             sbaddress <= sbaddress + (1 << sbcs_sbaccess);
                         end
-                        
+
                         if (sbcs_sbreadondata) begin
                             sb_read_req <= 1'b1;
                         end

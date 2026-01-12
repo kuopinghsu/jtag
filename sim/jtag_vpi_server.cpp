@@ -39,7 +39,7 @@ struct vpi_resp {
 
 JtagVpiServer::JtagVpiServer(int port)
     : port(port), server_sock(-1), client_sock(-1),
-      scan_state(SCAN_IDLE), scan_num_bits(0), scan_num_bytes(0),
+      scan_state(SCAN_IDLE), scan_is_legacy(true), scan_num_bits(0), scan_num_bytes(0),
             scan_bit_index(0), scan_bytes_received(0), scan_bytes_sent(0) {
     pending_tms = 0;
     pending_tdi = 0;
@@ -129,14 +129,15 @@ void JtagVpiServer::poll() {
     }
 
     // Continue any ongoing operations
-    // Always check scan state first (used by both legacy and minimal OpenOCD modes)
-    if (scan_state != SCAN_IDLE) {
-        continue_scan();
+    // For OpenOCD VPI mode, always use continue_vpi_work() which handles scans
+    if (protocol_mode == PROTO_OPENOCD_VPI) {
+        continue_vpi_work();
         return;
     }
 
-    if (protocol_mode == PROTO_OPENOCD_VPI) {
-        continue_vpi_work();
+    // For legacy protocol: check scan state and call continue_scan()
+    if (scan_state != SCAN_IDLE) {
+        continue_scan();
         return;
     }
 
@@ -443,6 +444,7 @@ void JtagVpiServer::process_vpi_packet() {
             scan_bit_index = 0;
             scan_bytes_received = scan_num_bytes; // mark buffers as ready
             scan_bytes_sent = 0;
+            scan_is_legacy = false;  // OpenOCD mode - don't send TDO bytes directly
             memset(scan_tdo_buf, 0, sizeof(scan_tdo_buf));
             // For OpenOCD, TMS is 0 for all bits, except last bit when cmd==3
             memset(scan_tms_buf, 0x00, scan_num_bytes);
@@ -551,18 +553,62 @@ void JtagVpiServer::continue_vpi_work() {
 
     // 3) If legacy scan state machine is active, let it progress
     if (scan_state == SCAN_PROCESSING || scan_state == SCAN_SENDING_TDO) {
+        DBG_PRINT(2, "[VPI][DBG] continue_vpi_work: scan_state=%d (2=PROC, 4=SEND)\n", scan_state);
         // Run legacy per-bit engine
         if (scan_state == SCAN_PROCESSING && pending_tck_pulse) return;
         continue_scan();
+        DBG_PRINT(2, "[VPI][DBG] After continue_scan: scan_state=%d, vpi_tx_pending=%d\n",
+            scan_state, vpi_tx_pending);
         // When legacy finishes sending TDO bytes, prepare and queue full response
         if (scan_state == SCAN_IDLE && !vpi_tx_pending && client_sock >= 0) {
+            DBG_PRINT(2, "[VPI][DBG] Scan complete, preparing response packet\n");
             // Fill TX buffer_in with captured TDO
             memcpy(vpi_cmd_tx.buffer_in, scan_tdo_buf, scan_num_bytes);
+            // Debug: Show first few bytes of TDO response
+            if (scan_num_bytes >= 4) {
+                DBG_PRINT(1, "[VPI][DBG] SCAN response TDO[0-3]=0x%02x 0x%02x 0x%02x 0x%02x\n",
+                    scan_tdo_buf[0], scan_tdo_buf[1], scan_tdo_buf[2], scan_tdo_buf[3]);
+            } else {
+                DBG_PRINT(1, "[VPI][DBG] SCAN response TDO[0]=0x%02x (bytes=%u)\n",
+                    scan_tdo_buf[0], scan_num_bytes);
+            }
             // Transmit full packet (OpenOCD expects fixed-size)
             vpi_tx_pending = true;
             vpi_tx_bytes = 0;
         }
         return;
+    }
+
+    // 4) If idle and not sending, try to receive next command packet
+    if (!vpi_tx_pending && client_sock >= 0) {
+        if (vpi_rx_bytes < VPI_PKT_SIZE) {
+            ssize_t ret = recv(client_sock, ((uint8_t*)&vpi_cmd_rx) + vpi_rx_bytes,
+                               VPI_PKT_SIZE - vpi_rx_bytes, MSG_DONTWAIT);
+            if (ret < 0) {
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    DBG_PRINT(1, "[VPI][DBG] Recv error in continue_vpi_work: %s\n", strerror(errno));
+                    close_connection();
+                }
+                return;
+            }
+            if (ret == 0) {
+                DBG_PRINT(1, "[VPI][DBG] Client disconnected in continue_vpi_work\n");
+                close_connection();
+                return;
+            }
+            vpi_rx_bytes += ret;
+            DBG_PRINT(2, "[VPI][DBG] Received %zd bytes in continue_vpi_work, total=%d\n", ret, vpi_rx_bytes);
+            if (vpi_rx_bytes < VPI_PKT_SIZE) {
+                return; // wait for rest of packet
+            }
+        }
+
+        // Full packet received - process it
+        DBG_PRINT(2, "[VPI][DBG] Full packet received in continue_vpi_work, processing...\n");
+        process_vpi_packet();
+        DBG_PRINT(2, "[VPI][DBG] Packet processed in continue_vpi_work, resetting buffer\n");
+        vpi_rx_bytes = 0;
+        memset(&vpi_cmd_rx, 0, sizeof(vpi_cmd_rx));
     }
 }
 
@@ -646,6 +692,7 @@ void JtagVpiServer::process_scan(uint32_t num_bits) {
     scan_bit_index = 0;
     scan_bytes_received = 0;
     scan_bytes_sent = 0;
+    scan_is_legacy = true;  // Legacy protocol mode
     memset(scan_tms_buf, 0, sizeof(scan_tms_buf));
     memset(scan_tdi_buf, 0, sizeof(scan_tdi_buf));
     memset(scan_tdo_buf, 0, sizeof(scan_tdo_buf));
@@ -694,6 +741,9 @@ void JtagVpiServer::continue_scan() {
             // 1. If pending_tck_pulse is true: TCK pulse is in progress, wait for it to complete
             // 2. If pending_tck_pulse is false and scan_bit_index > 0: capture TDO from last bit
             // 3. Request TCK pulse for next bit
+
+            DBG_PRINT(2, "[VPI][DBG] SCAN_PROCESSING: bit_index=%u/%u, pending_tck=%d\n",
+                scan_bit_index, scan_num_bits, pending_tck_pulse);
 
             // If a TCK pulse is still pending, wait for simulation to complete it
             if (pending_tck_pulse) {
@@ -744,12 +794,22 @@ void JtagVpiServer::continue_scan() {
                         scan_tdo_buf[last_byte_idx] &= ~(1 << last_bit_pos);
                     }
                 }
-                scan_bytes_sent = 0;
-                scan_state = SCAN_SENDING_TDO;
+                DBG_PRINT(2, "[VPI][DBG] SCAN_PROCESSING complete: %u bits processed\n", scan_bit_index);
+
+                if (scan_is_legacy) {
+                    // Legacy protocol: Send TDO bytes directly over socket
+                    scan_bytes_sent = 0;
+                    scan_state = SCAN_SENDING_TDO;
+                } else {
+                    // OpenOCD VPI: Don't send bytes here, go to IDLE
+                    // continue_vpi_work() will prepare and send full 1036-byte response
+                    scan_state = SCAN_IDLE;
+                }
             }
             break;
 
         case SCAN_SENDING_TDO:
+            DBG_PRINT(2, "[VPI][DBG] SCAN_SENDING_TDO: %u/%u bytes sent\n", scan_bytes_sent, scan_num_bytes);
             // Send TDO buffer as response packets
             // Send up to all bytes in one go since non-blocking might handle it
             ret = send(client_sock, scan_tdo_buf + scan_bytes_sent,
@@ -757,6 +817,7 @@ void JtagVpiServer::continue_scan() {
             if (ret > 0) {
                 scan_bytes_sent += ret;
                 if (scan_bytes_sent >= scan_num_bytes) {
+                    DBG_PRINT(2, "[VPI][DBG] SCAN_SENDING_TDO complete: %u bytes sent\n", scan_bytes_sent);
                     static int debug_scans = 0;
                     if (debug_scans < 3) {
                         printf("[VPI][DBG] SCAN bits=%u bytes=%u TDO[0]=0x%02x TDO[1]=0x%02x\n",

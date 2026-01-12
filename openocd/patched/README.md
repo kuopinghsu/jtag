@@ -160,7 +160,7 @@ cp Makefile.am.backup Makefile.am
 After successful build and installation:
 
 ```bash
-cd /Users/kuoping/Projects/jtag
+cd {PROJECT_DIR}
 
 # Start simulation in background
 make vpi-sim &

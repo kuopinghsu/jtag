@@ -120,6 +120,7 @@ private:
         SCAN_SENDING_TDO
     };
     ScanState scan_state;
+    bool scan_is_legacy;  // true for legacy protocol, false for OpenOCD VPI
     uint32_t scan_num_bits;
     uint32_t scan_num_bytes;
     uint32_t scan_bit_index;

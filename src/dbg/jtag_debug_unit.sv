@@ -6,7 +6,7 @@
 module jtag_debug_unit (
     input  logic       clk,
     input  logic       rst_n,
-    
+
     // JTAG interface
     input  logic       tdi,
     output logic       tdo,
@@ -14,7 +14,7 @@ module jtag_debug_unit (
     input  logic       update_dr,
     input  logic       capture_dr,
     input  logic [7:0] ir_out,      // Instruction register output
-    
+
     // Debug interface
     output logic [31:0] idcode,
     output logic [31:0] status_reg,
@@ -25,7 +25,7 @@ module jtag_debug_unit (
     localparam [7:0] IR_IDCODE  = 8'h01;
     localparam [7:0] IR_BYPASS  = 8'hFF;
     localparam [7:0] IR_DEBUG   = 8'h08;
-    
+
     // IDCODE register - Device identification
     // Format: [31:28]=Version, [27:12]=PartNumber, [11:1]=Manufacturer, [0]=1
     localparam [31:0] IDCODE_VALUE = {
@@ -82,7 +82,7 @@ module jtag_debug_unit (
     // Output registers
     assign idcode = IDCODE_VALUE;
     assign status_reg = {31'h0, debug_req};
-    
+
     // Debug request - set if debug command received
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

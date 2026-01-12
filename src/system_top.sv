@@ -9,7 +9,7 @@ import jtag_dmi_pkg::*;
 module system_top (
     input  logic        clk,
     input  logic        rst_n,
-    
+
     // 4 Shared Physical I/O Pins (JTAG 4-wire / cJTAG 2-wire)
     input  logic        jtag_pin0_i,
     input  logic        jtag_pin1_i,
@@ -19,10 +19,10 @@ module system_top (
     output logic        jtag_pin3_o,
     output logic        jtag_pin3_oen,
     input  logic        jtag_trst_n_i,
-    
+
     // Mode control
     input  logic        mode_select,
-    
+
     // Debug outputs for monitoring
     output logic [31:0] idcode,
     output logic        debug_req,
@@ -38,7 +38,7 @@ module system_top (
     logic [1:0]                dmi_resp;    // dmi_resp_e
     logic                      dmi_req_valid;
     logic                      dmi_req_ready;
-    
+
     // Hart interface signals
     logic [0:0]  hart_reset_req;
     logic [0:0]  hart_halt_req;
@@ -47,7 +47,7 @@ module system_top (
     logic [0:0]  hart_running_bus;
     logic [0:0]  hart_unavailable;
     logic [0:0]  hart_havereset;
-    
+
     // Hart debug interface (GPR/CSR access)
     logic [4:0]  hart_gpr_addr;
     logic [31:0] hart_gpr_wdata;
@@ -57,13 +57,13 @@ module system_top (
     logic [31:0] hart_csr_wdata;
     logic [31:0] hart_csr_rdata;
     logic        hart_csr_we;
-    
+
     // Program buffer execution
     logic [31:0] progbuf_insn;
     logic        progbuf_insn_valid;
     logic        progbuf_insn_done;
     logic        progbuf_exception;
-    
+
     // System bus interface signals
     logic [63:0] sb_address;
     logic [63:0] sb_wdata;
@@ -73,7 +73,7 @@ module system_top (
     logic        sb_write_req;
     logic        sb_ready;
     logic        sb_error;
-    
+
     // Convert single hart to bus
     assign hart_halted = hart_halted_bus[0];
     logic hart_running;
@@ -161,30 +161,30 @@ module system_top (
     logic [31:0] hart_gprs [32];  // General purpose registers
     logic [31:0] hart_csrs [4096];  // CSR space
     logic [15:0] progbuf_exec_count;
-    
+
     assign hart_halted_bus[0] = hart_state;
     assign hart_running_bus[0] = !hart_state;
     assign hart_unavailable[0] = 1'b0;  // Hart is always available
     assign hart_havereset[0] = 1'b0;    // No recent reset
-    
+
     // GPR/CSR access
     assign hart_gpr_rdata = hart_gprs[hart_gpr_addr];
     assign hart_csr_rdata = hart_csrs[hart_csr_addr];
-    
+
     // Program buffer execution (simple model - executes in 1 cycle)
     assign progbuf_insn_done = progbuf_insn_valid;
     assign progbuf_exception = 1'b0;  // No exceptions in simple model
-    
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             hart_state <= 1'b0;  // Start running
             progbuf_exec_count <= 16'h0;
-            
+
             // Initialize GPRs to zero
             for (int i = 0; i < 32; i++) begin
                 hart_gprs[i] <= 32'h0;
             end
-            
+
             // Initialize some test CSRs
             hart_csrs[12'h300] <= 32'h00001800;  // mstatus
             hart_csrs[12'h301] <= 32'h40001104;  // misa (RV32I)
@@ -192,7 +192,7 @@ module system_top (
             hart_csrs[12'hF12] <= 32'hDEAD0001;  // marchid
             hart_csrs[12'hF13] <= 32'h00000001;  // mimpid
             hart_csrs[12'hF14] <= 32'h00000000;  // mhartid
-            
+
         end else begin
             // Hart state control
             if (hart_reset_req[0]) begin
@@ -202,19 +202,19 @@ module system_top (
             end else if (hart_resume_req[0]) begin
                 hart_state <= 1'b0;
             end
-            
+
             // GPR write
             if (hart_gpr_we && hart_state) begin
                 if (hart_gpr_addr != 5'h0) begin  // x0 is hardwired to 0
                     hart_gprs[hart_gpr_addr] <= hart_gpr_wdata;
                 end
             end
-            
+
             // CSR write
             if (hart_csr_we && hart_state) begin
                 hart_csrs[hart_csr_addr] <= hart_csr_wdata;
             end
-            
+
             // Program buffer execution tracking
             if (progbuf_insn_valid) begin
                 progbuf_exec_count <= progbuf_exec_count + 1;
@@ -228,10 +228,10 @@ module system_top (
     // Simulates memory-mapped peripheral access
     logic [63:0] memory [0:255];
     logic        sb_busy;
-    
+
     assign sb_ready = !sb_busy;
     assign sb_error = 1'b0;  // No errors in this simple model
-    
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             sb_rdata <= 64'h0;
