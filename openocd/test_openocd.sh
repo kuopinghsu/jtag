@@ -162,7 +162,7 @@ else
     ((FAIL_COUNT++))
 fi
 
-# Test 3: JTAG interface  
+# Test 3: JTAG interface
 echo ""
 echo "Test 3: JTAG Interface Detection"
 if grep -q "interrogation failed\|scan chain\|TAP" "$LOG_FILE" 2>/dev/null; then
@@ -224,13 +224,14 @@ LEGACY_RESULT=0
 
 if [ "$MODE" == "jtag" ]; then
     echo ""
-    echo "=== Unified Protocol Testing (jtag + legacy) ==="
+    echo "=== Unified Protocol Testing (JTAG mode) ==="
+    echo "Note: Legacy protocol testing moved to 'make test-legacy'"
 
     JTAG_TEST="$SCRIPT_DIR/test_protocol"
     JTAG_SRC="$SCRIPT_DIR/test_protocol.c"
 
     if { [ ! -f "$JTAG_TEST" ] || [ "$JTAG_SRC" -nt "$JTAG_TEST" ]; } && [ -f "$JTAG_SRC" ]; then
-        echo "Compiling protocol test (jtag/legacy)..."
+        echo "Compiling protocol test (jtag)..."
         gcc -o "$JTAG_TEST" "$JTAG_SRC" 2>/dev/null || {
             echo "  ⚠ Could not compile protocol test (gcc required)"
             JTAG_TEST=""
@@ -244,14 +245,12 @@ if [ "$MODE" == "jtag" ]; then
         wait $OPENOCD_PID 2>/dev/null || true
         sleep 2
 
-        # Run JTAG protocol test
+        # Run JTAG protocol test only
         "$JTAG_TEST" jtag
         PROTOCOL_RESULT=$?
 
-        echo ""
-        echo "=== Legacy VPI Protocol Testing (8-byte format) ==="
-        "$JTAG_TEST" legacy
-        LEGACY_RESULT=$?
+        # Legacy protocol testing handled separately
+        LEGACY_RESULT=0
     else
         echo "⚠ Protocol test not available (gcc not found)"
         PROTOCOL_RESULT=0
@@ -262,19 +261,19 @@ fi
 if [ "$MODE" == "cjtag" ]; then
     echo ""
     echo "=== cJTAG Protocol Testing ==="
-    
+
     # Compile unified protocol test (cJTAG mode)
     CJTAG_TEST="$SCRIPT_DIR/test_protocol"
     CJTAG_SRC="$SCRIPT_DIR/test_protocol.c"
 
     if { [ ! -f "$CJTAG_TEST" ] || [ "$CJTAG_SRC" -nt "$CJTAG_TEST" ]; } && [ -f "$CJTAG_SRC" ]; then
-        echo "Compiling protocol test (cjtag)..." 
+        echo "Compiling protocol test (cjtag)..."
         gcc -o "$CJTAG_TEST" "$CJTAG_SRC" 2>/dev/null || {
             echo "  ⚠ Could not compile protocol test (gcc required)"
             CJTAG_TEST=""
         }
     fi
-    
+
     if [ -x "$CJTAG_TEST" ]; then
         # Kill OpenOCD to free VPI connection
         pkill -P $OPENOCD_PID openocd 2>/dev/null || true
@@ -302,19 +301,10 @@ if [ "$MODE" == "cjtag" ]; then
         echo "⚠ cJTAG protocol test not available (gcc not found)"
         PROTOCOL_RESULT=0
     fi
-    
-    # Also test legacy protocol compatibility in cJTAG mode
-    echo ""
-    echo "=== Legacy Protocol Backward Compatibility Test (cJTAG mode) ==="
-    echo "Verifying server still supports 8-byte format in cJTAG mode..."
-    echo "Skipping: legacy 8-byte protocol is not expected to work when the server runs with --cjtag"
+
+    # Note: Legacy protocol testing is handled separately via 'make test-legacy'
     LEGACY_RESULT=0
 
-    # Skip the legacy test entirely in cJTAG mode because the VPI server
-    # runs in two-wire mode and the legacy 8-byte client uses four-wire
-    # semantics. Running the test here only produces timeouts.
-    :
-    
 fi
 
 # ============================================================
@@ -327,18 +317,14 @@ echo "OpenOCD connectivity: $([ $OPENOCD_RESULT -eq 0 ] && echo "PASS" || echo "
 
 if [ "$MODE" == "jtag" ]; then
     echo "JTAG protocol:        $([ "${PROTOCOL_RESULT:-1}" -eq 0 ] && echo "PASS" || echo "FAIL")"
-    echo "Legacy protocol:      $([ "${LEGACY_RESULT:-1}" -eq 0 ] && echo "PASS (skipped - OpenOCD used modern protocol)" || echo "FAIL")"
-    
+    echo ""
+    echo "Note: Run 'make test-legacy' to test legacy 8-byte protocol separately"
+
     # For JTAG mode, require connectivity test to pass
-    # Legacy protocol test is optional (skipped if OpenOCD uses modern protocol)
     if [ $OPENOCD_RESULT -eq 0 ]; then
         echo ""
         echo "✓ ALL TESTS PASSED"
-        if [ "${LEGACY_RESULT:-1}" -eq 0 ]; then
-            echo "  (OpenOCD connectivity + Legacy protocol compatibility verified)"
-        else
-            echo "  (OpenOCD connectivity verified with modern jtag_vpi protocol)"
-        fi
+        echo "  (OpenOCD connectivity verified with modern jtag_vpi protocol)"
         RESULT=0
     else
         echo ""

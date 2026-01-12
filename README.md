@@ -107,7 +107,7 @@ Tests:
 ### JTAG Standalone Test
 
 ```bash
-make verilator       # Build JTAG testbench  
+make verilator       # Build JTAG testbench
 make sim             # Run JTAG tests
 ```
 
@@ -407,7 +407,7 @@ ls syn/reports/    # Area and timing statistics (.rpt)
 
 **Synthesis Outputs:**
 - `syn/results/jtag_top_synth.v` - JTAG module netlist
-- `syn/results/riscv_debug_module_synth.v` - Debug module netlist  
+- `syn/results/riscv_debug_module_synth.v` - Debug module netlist
 - `syn/results/system_top_synth.v` - System integration netlist
 - `syn/reports/*_stats.rpt` - Area/cell statistics
 
@@ -527,6 +527,45 @@ See [docs/OSCAN1_IMPLEMENTATION.md](docs/OSCAN1_IMPLEMENTATION.md) for detailed 
 
 ## Testing
 
+### Testing Architecture
+
+The project uses a **two-layer testing approach** to balance speed, simplicity, and real-world validation:
+
+**Layer 1: Direct Protocol Testing** (`test_protocol.c`)
+- **Purpose**: Fast, focused testing of VPI protocol implementation
+- **Targets**: `make test-legacy`
+- **Method**: Direct VPI socket communication (no OpenOCD dependency)
+- **Benefits**:
+  - Runs in <1 second (vs. several seconds with OpenOCD)
+  - No external dependencies required
+  - Tests protocol edge cases and error handling
+  - Validates 8-byte legacy VPI format
+- **Test Coverage**: 11 command-level tests for legacy protocol
+
+**Layer 2: Integration Testing** (`test_openocd.sh`)
+- **Purpose**: Validate real-world OpenOCD integration
+- **Targets**: `make test-jtag`, `make test-cjtag`
+- **Method**: OpenOCD + 1036-byte jtag_vpi protocol
+- **Benefits**:
+  - Validates OpenOCD compatibility
+  - Tests full IEEE 1149.1/1149.7 protocol stacks
+  - Real-world usage patterns
+  - Comprehensive JTAG/cJTAG command sequences
+- **Test Coverage**:
+  - JTAG: 17 tests (11 commands + 6 physical layer)
+  - cJTAG: 16 tests (10 commands + 6 physical layer)
+
+**Why This Split?**
+- Legacy protocol testing doesn't require OpenOCD's complexity
+- Direct testing catches protocol bugs faster during development
+- Integration testing ensures production readiness with real tools
+- Each layer optimized for its specific validation goal
+
+**See Also:**
+- [Makefile](Makefile) (lines 377-382) - Developer documentation
+- [openocd/test_openocd.sh](openocd/test_openocd.sh) - Runtime notes
+- [docs/PROTOCOL_TEST_COMPARISON.md](docs/PROTOCOL_TEST_COMPARISON.md) - Complete test matrix
+
 ### Run All Tests
 ```bash
 make sim  # Runs 5 automated tests
@@ -549,6 +588,19 @@ make test-vpi
 # Manual
 make vpi-sim &
 ./build/jtag_vpi_client
+```
+
+### Protocol Testing
+```bash
+# Layer 1: Direct protocol testing (fast, no OpenOCD)
+make test-legacy       # 11 legacy protocol tests
+
+# Layer 2: Integration testing (with OpenOCD)
+make test-jtag         # 17 JTAG protocol tests
+make test-cjtag        # 16 cJTAG protocol tests
+
+# Run all protocol tests
+make test-all-protocols  # All 50 tests (11 + 17 + 16 + 6 combo)
 ```
 
 ## License

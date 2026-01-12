@@ -373,10 +373,16 @@ test-cjtag: $(BUILD_DIR)/jtag_vpi
 	@echo "View waveforms: gtkwave jtag_vpi.fst"
 	@echo "Server log: vpi_cjtag.log"
 
+# Legacy protocol testing
+# Note: test-legacy uses test_protocol.c for direct VPI protocol testing,
+# while test-jtag/test-cjtag use test_openocd.sh for OpenOCD integration testing.
+# This separation allows:
+#   - Protocol layer testing (test-legacy): Fast, no OpenOCD dependency
+#   - Integration testing (test-jtag/cjtag): Real-world OpenOCD usage
 test-legacy: $(BUILD_DIR)/jtag_vpi
 	@echo ""
 	@echo "=== Automated Legacy Protocol Test ==="
-	@echo "Testing 8-byte command format backward compatibility"
+	@echo "Testing 8-byte command format backward compatibility (direct VPI protocol)"
 	@pkill -9 jtag_vpi 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in legacy protocol mode..."

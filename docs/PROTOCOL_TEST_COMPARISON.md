@@ -9,7 +9,7 @@ The four protocol test suites test **different layers and aspects** of the JTAG 
 - **Legacy**: Backward-compatible 8-byte VPI protocol (11 tests: command-level, 4-wire)
 - **Combo**: Protocol switching and integration (6 tests: JTAG ⇄ Legacy mixing)
 
-**Key Findings**: 
+**Key Findings**:
 - **JTAG and Legacy now have command-level parity** - all combinations covered ✅
 - JTAG and cJTAG both provide comprehensive testing for their respective physical layers
 - Combo tests validate protocol auto-detection and real-world mixed protocol usage
@@ -24,7 +24,7 @@ The four protocol test suites test **different layers and aspects** of the JTAG 
 **Command Protocol Tests (11 tests):**
 
 | Test | Operation | Protocol Layer | Command |
-|------|-----------|----------------|---------||
+|------|-----------|----------------|---------|
 | TAP Reset | Reset TAP state machine | Command | 0x00 (CMD_RESET) |
 | Mode Query | Query current mode (JTAG/cJTAG) | Command | 0x03 (CMD_SET_PORT) |
 | Scan 8 bits | Shift 8 bits through chain | Command | 0x02 (CMD_SCAN) |
@@ -149,7 +149,7 @@ The four protocol test suites test **different layers and aspects** of the JTAG 
 | **Physical Validation** | TAP states, signal integrity | OAC, JScan, SF0, CRC-8 | **Both test, different features** |
 | **Stress Tests** | TCK frequency, rapid commands | Rapid commands, extended SF0 | **Both test** ✅ |
 
-**Verdict**: 
+**Verdict**:
 - ✅ **Both JTAG and cJTAG test physical + command layers**
 - ✅ **JTAG validates 4-wire physical interface** (TCK/TMS/TDI/TDO)
 - ✅ **cJTAG validates 2-wire physical interface** (TCKC/TMSC)
@@ -189,7 +189,7 @@ JTAG Stack:                     cJTAG Stack:                  Combo Stack:
 └─────────────────┘            │ 2-Wire Physical │ ← Tested  └─────────────────┘
                                │ TCKC/TMSC       │
                                └─────────────────┘
-                               
+
 All test their respective layers comprehensively!
 ```
 
@@ -211,7 +211,7 @@ All test their respective layers comprehensively!
 | **Invalid Command** | ✅ 0xFF handling | ✅ 0xFF handling | ✅ Same concept |
 | **Scan Patterns** | ✅ Pattern test | ✅ Pattern test | ✅ Same concept |
 
-**Verdict**: 
+**Verdict**:
 - ✅ **100% command-level parity achieved!** ✅
 - ✅ All 11 command tests covered in both protocols
 - ❌ Different **protocol formats** (modern vs legacy)
@@ -227,7 +227,7 @@ All test their respective layers comprehensively!
        uint8_t pad[3];
        uint32_t length;  // little-endian
    };
-   
+
    // Legacy (8-byte VPI)
    struct legacy_cmd {
        uint8_t cmd;
@@ -264,7 +264,7 @@ All test their respective layers comprehensively!
 | **Mixed Scan Operations** | ❌ | ❌ | ❌ | ✅ | JTAG + Legacy scans |
 | **Cross-Protocol Resets** | ❌ | ❌ | ❌ | ✅ | Back-to-back resets |
 
-**Key Insights**: 
+**Key Insights**:
 - **JTAG & cJTAG**: Comprehensive physical + command testing for their respective interfaces
 - **Legacy**: Command-level backward compatibility
 - **Combo**: Protocol switching and integration testing (JTAG + Legacy only)
@@ -329,8 +329,8 @@ The four protocol test suites provide **layered coverage**:
 
 ---
 
-**Generated:** 2026-01-12  
-**Test Suite:** `openocd/test_protocol.c`  
-**Total Tests:** 50 (17 JTAG + 16 cJTAG + 11 Legacy + 6 Combo)  
+**Generated:** 2026-01-12
+**Test Suite:** `openocd/test_protocol.c`
+**Total Tests:** 50 (17 JTAG + 16 cJTAG + 11 Legacy + 6 Combo)
 **Latest Update:** Added command-level parity tests - JTAG and Legacy now cover all command combinations
 
