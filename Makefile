@@ -1,6 +1,6 @@
 # JTAG/cJTAG SystemVerilog Project Makefile
 
-.PHONY: all clean verilator vpi sim client help test-vpi synth synth-jtag synth-reports synth-clean test-jtag-legacy
+.PHONY: all clean verilator vpi sim client help test-vpi synth synth-jtag synth-reports synth-clean test-legacy
 
 # Directories
 SRC_DIR := src
@@ -68,7 +68,7 @@ help:
 	@echo "  make client         - Build VPI client"
 	@echo "  make test-vpi       - Test VPI server and client (automatic)"
 	@echo "  make test-jtag      - Test JTAG mode with OpenOCD (automatic)"
-	@echo "  make test-jtag-legacy - Test legacy 8-byte protocol (automatic)"
+	@echo "  make test-legacy    - Test JTAG legacy 8-byte protocol (automatic)"
 	@echo "  make test-cjtag     - Test cJTAG mode with OpenOCD (experimental)"
 	@echo "  make synth          - Synthesize all modules with ASAP7 PDK"
 	@echo "  make synth-jtag     - Synthesize JTAG top module only"
@@ -81,7 +81,7 @@ help:
 	@echo "  make verilator && make sim      (JTAG testbench)"
 	@echo "  make test-vpi                   (automated VPI test)"
 	@echo "  make test-jtag                  (automated JTAG test)"
-	@echo "  make test-jtag-legacy           (legacy protocol test)"
+	@echo "  make test-legacy                (legacy protocol test)"
 	@echo "  make synth                      (ASAP7 synthesis)"
 	@echo ""
 	@echo "Configurable timeouts:"
@@ -373,7 +373,7 @@ test-cjtag: $(BUILD_DIR)/jtag_vpi
 	@echo "View waveforms: gtkwave jtag_vpi.fst"
 	@echo "Server log: vpi_cjtag.log"
 
-test-jtag-legacy: $(BUILD_DIR)/jtag_vpi
+test-legacy: $(BUILD_DIR)/jtag_vpi
 	@echo ""
 	@echo "=== Automated Legacy Protocol Test ==="
 	@echo "Testing 8-byte command format backward compatibility"
