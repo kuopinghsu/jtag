@@ -15,6 +15,16 @@ The four protocol test suites test **different layers and aspects** of the JTAG 
 - Combo tests validate protocol auto-detection and real-world mixed protocol usage
 - Total: **50 tests** across all four test suites
 
+### Implementation Detail Comparison (at a glance)
+| Aspect | JTAG (modern) | cJTAG (OScan1) | Legacy (8-byte) | Combo (JTAG+Legacy) |
+|--------|---------------|----------------|-----------------|---------------------|
+| Framing | Full 1036-byte OpenOCD packet **or** 8-byte minimal | Full 1036-byte OpenOCD packet (CMD_OSCAN1) | 8-byte legacy header | Mixed: JTAG full/minimal + legacy 8-byte |
+| Buffers | 512B TX (TMS/TDI) + 512B RX (TDO) | Same 512B+512B; uses OSCAN1 payload | No fixed buffers; small TMS/TDI/TDO exchanges | Depends on active protocol |
+| Bit-length fields | `length` + `nb_bits` (LE) | `length` + `nb_bits` (LE) | `length` (BE in legacy header) | Per active protocol |
+| Mode detection | CMD_SET_PORT (cmd=0x03) and auto-detect minimal vs full | CMD_SET_PORT + OScan1 JScan enable | None (implicit legacy mode) | Auto-detect between JTAG vs Legacy |
+| Scan handling | Full mode: pre-buffered; minimal: response then TMS/TDI/TDO stream | Full mode with CMD_OSCAN1 two-wire handling | Response then TMS/TDI/TDO stream | Matches chosen protocol path |
+| Wiring | 4-wire TCK/TMS/TDI/TDO | 2-wire TCKC/TMSC | 4-wire | Both (per protocol) |
+
 ---
 
 ## Detailed Test Coverage Comparison
@@ -54,6 +64,19 @@ The four protocol test suites test **different layers and aspects** of the JTAG 
 - Modern OpenOCD jtag_vpi format
 - Tests **both** command-level (11 tests) and physical-level (6 tests) operations
 - **Command-level parity with Legacy achieved** ✅
+- **Protocol framing:**
+  - **Minimal (8-byte) mode**: cmd + pad[3] + length (used by `test_protocol` for fast command/scan loops; server auto-detects when only 8 bytes arrive).
+  - **Full (1036-byte) mode**: OpenOCD fixed-size packet (cmd + buffers + length + nb_bits), used by OpenOCD during normal jtag_vpi operation.
+
+**Implementation notes (where it lives):**
+- Minimal/full auto-detect is in the VPI server poll path: [sim/jtag_vpi_server.cpp](sim/jtag_vpi_server.cpp#L150-L245).
+- Minimal-mode command parsing (8-byte header → `cmd`, `length/nb_bits`) and full-mode parsing (`cmd`, `length`, `nb_bits` from the 1036-byte packet) are in [sim/jtag_vpi_server.cpp](sim/jtag_vpi_server.cpp#L360-L420).
+- Minimal-mode scans: response first, then TMS/TDI/TDO streamed via the legacy scan engine; full-mode scans use pre-buffered TMS/TDI with TDO returned in the 1036-byte response in [sim/jtag_vpi_server.cpp](sim/jtag_vpi_server.cpp#L410-L470).
+
+### OpenOCD jtag_vpi framing modes (implementation detail)
+- **Minimal mode (8-byte commands):** compact, legacy-like format used by the small `test_protocol` client. Command layout: `cmd` (1 byte) + pad (3 bytes) + `length` (4 bytes, little-endian). The server treats this as minimal, parses those 8 bytes, and replies with 4 bytes (`response`, `tdo_val`, `mode`, `status`). SCAN/TMS data then flows in separate small payloads (TMS, TDI, then TDO). Parsing and scan handling: [sim/jtag_vpi_server.cpp](sim/jtag_vpi_server.cpp#L210-L330). Client struct: [openocd/test_protocol.c](openocd/test_protocol.c#L120-L190).
+- **Full mode (1036-byte packets):** normal OpenOCD `jtag_vpi` protocol. Fixed-size packet: 4-byte `cmd`, 512-byte outbound buffer (TMS/TDI), 512-byte inbound buffer (TDO), 4-byte `length`, 4-byte `nb_bits` (total 1036 bytes). OpenOCD sends these; the server processes and returns a full 1036-byte response with TDO filled. Parsing: [sim/jtag_vpi_server.cpp](sim/jtag_vpi_server.cpp#L200-L260). Packet layout: [sim/jtag_vpi_server.h](sim/jtag_vpi_server.h#L30-L50).
+- **Which mode is used:** OpenOCD uses **full mode**; the lightweight `test_protocol` client uses **minimal mode**. The server auto-detects based on how many bytes arrive and the first command byte.
 
 ---
 
