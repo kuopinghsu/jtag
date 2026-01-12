@@ -295,18 +295,18 @@ test-vpi: $(BUILD_DIR)/jtag_vpi client
 # OpenOCD testing targets
 test-jtag: $(BUILD_DIR)/jtag_vpi
 	@echo ""
-	@echo "=== Automated JTAG Mode Test ==="
+	@echo "=== Automated OpenOCD JTAG Mode Test ==="
 	@echo "Cleaning up any previous VPI servers..."
 	@pkill -9 jtag_vpi openocd 2>/dev/null || true
 	@sleep 1
-	@echo "Starting VPI server in background..."
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(TEST_TIMEOUT) > vpi_openocd.log 2>&1 & \
+	@echo "Starting VPI server in JTAG mode..."
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(TEST_TIMEOUT) > vpi_jtag.log 2>&1 & \
 		SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \
 		sleep 3; \
 		if ! kill -0 $$SERVER_PID 2>/dev/null; then \
 			echo "✗ VPI server failed to start"; \
-			echo "Check vpi_openocd.log for details"; \
+			echo "Check vpi_jtag.log for details"; \
 			exit 1; \
 		fi; \
 		echo "✓ VPI server started successfully"; \
@@ -331,7 +331,7 @@ test-jtag: $(BUILD_DIR)/jtag_vpi
 		fi
 	@echo ""
 	@echo "View waveforms: gtkwave jtag_vpi.fst"
-	@echo "Server log: vpi_openocd.log"
+	@echo "Server log: vpi_jtag.log"
 
 test-cjtag: $(BUILD_DIR)/jtag_vpi
 	@echo ""
@@ -370,6 +370,8 @@ test-cjtag: $(BUILD_DIR)/jtag_vpi
 			exit 1; \
 		fi
 	@echo ""
+	@echo "View waveforms: gtkwave jtag_vpi.fst"
+	@echo "Server log: vpi_cjtag.log"
 
 test-jtag-legacy: $(BUILD_DIR)/jtag_vpi
 	@echo ""
@@ -414,6 +416,4 @@ test-jtag-legacy: $(BUILD_DIR)/jtag_vpi
 	@echo ""
 	@echo "View waveforms: gtkwave jtag_vpi.fst"
 	@echo "Server log: vpi_legacy.log"
-
-
 
