@@ -1,0 +1,33 @@
+# Copilot Instructions for JTAG/cJTAG Project
+
+- Purpose: SystemVerilog IEEE 1149.1 JTAG + IEEE 1149.7 cJTAG (OScan1) with RISC-V DTM/DM integration, Verilator simulation, and OpenOCD VPI bridge.
+- Start reading: [src/jtag/jtag_top.sv](../src/jtag/jtag_top.sv), [src/jtag/jtag_tap_controller.sv](../src/jtag/jtag_tap_controller.sv), [src/jtag/oscan1_controller.sv](../src/jtag/oscan1_controller.sv), [src/dbg/riscv_debug_module.sv](../src/dbg/riscv_debug_module.sv), [sim/jtag_vpi_server.cpp](../sim/jtag_vpi_server.cpp), [tb/jtag_tb.sv](../tb/jtag_tb.sv).
+- Architecture: JTAG/cJTAG core in `src/jtag`, RISC-V debug in `src/dbg`, integrated example in [src/system_top.sv](../src/system_top.sv). VPI wrapper [sim/jtag_vpi_top.sv](../sim/jtag_vpi_top.sv) exposes DUT to TCP server [sim/jtag_vpi_server.cpp](../sim/jtag_vpi_server.cpp) on port 3333; C/C++ clients live in [vpi/](../vpi).
+- Build/test (Verilator):
+  - `make sim` builds and runs JTAG testbench (produces `jtag_sim.fst` when tracing enabled).
+  - `make system && make sim-system` builds/runs system integration (DTM + DM).
+  - `make test-vpi` smoke-tests VPI server startup; client protocol differs from OpenOCD.
+- VPI interactive runs:
+  - `make vpi-sim` (auto protocol detect) or `make vpi-sim-openocd` / `make vpi-sim-legacy` to force mode; server listens on 3333.
+  - `make client` builds `build/jtag_vpi_advanced`; `make vpi` builds simple client.
+  - Flags: `DUMP_FST=1` enables runtime tracing; `ENABLE_FST=1` builds trace support; `DEBUG=1|2` increases VPI logs; `SIM_TIMEOUT`/`TEST_TIMEOUT` seconds.
+  - VPI debug levels: `DEBUG=1 make vpi-sim` shows concise server activity (connections, protocol detects); `DEBUG=2 make vpi-sim` adds verbose per-scan logging—useful when chasing OpenOCD packet handling.
+- OpenOCD integration:
+  - Configs in [openocd/jtag.cfg](../openocd/jtag.cfg) and [openocd/cjtag.cfg](../openocd/cjtag.cfg).
+  - `make test-jtag` runs end-to-end OpenOCD JTAG flow (reads IDCODE 0x1DEAD3FF).
+  - `make test-cjtag` is experimental: VPI currently forces JTAG mode; OpenOCD stock driver lacks cJTAG commands.
+  - For real cJTAG, apply patches in [openocd/patched](../openocd/patched) per [docs/OPENOCD_CJTAG_PATCH_GUIDE.md](../docs/OPENOCD_CJTAG_PATCH_GUIDE.md).
+- RTL conventions:
+  - cJTAG OScan1 controller handles OAC, JScan, zero insertion/deletion, CRC-8 (x^8 + x^2 + x + 1) with parity; see [docs/OSCAN1_IMPLEMENTATION.md](../docs/OSCAN1_IMPLEMENTATION.md).
+  - Multi-TAP support up to 8 TAPs; IR length configurable per TAP; details in [docs/MULTI_TAP_SCAN_CHAIN.md](../docs/MULTI_TAP_SCAN_CHAIN.md).
+  - DTM IDCODE default 0x1DEAD3FF defined in [src/jtag/jtag_dtm.sv](../src/jtag/jtag_dtm.sv).
+- Synthesis flow:
+  - OSS CAD Suite + ASAP7; run `make synth` or module-specific `make synth-jtag`, `make synth-dbg`, `make synth-system`; scripts in [syn/scripts](../syn/scripts).
+  - Outputs under `syn/results/`, reports under `syn/reports/`; clean with `make synth-clean`.
+- Testing expectations (QuickStart): `make sim` should pass 5 tests (TAP reset, IDCODE JTAG/cJTAG, debug request, mode switch). VPI/OpenOCD quick smoke via `make test-vpi`/`make test-jtag`.
+- Known pitfalls:
+  - VPI cJTAG flag (`--cjtag`) currently overridden by `pending_mode_select=0`; cJTAG validation requires direct sim (no VPI) or patched OpenOCD.
+  - `jtag_vpi_client.c` uses legacy 4-byte protocol; OpenOCD uses 1036-byte packets—do not expect compatibility.
+  - Waveform tracing disabled by default; use `DUMP_FST=1` and optionally `ENABLE_FST=1` when building.
+- Useful docs: [README.md](../README.md) for features/commands, [QUICKSTART.md](../QUICKSTART.md) for expected outputs, [docs/PROTOCOL_TESTING.md](../docs/PROTOCOL_TESTING.md) if present, [docs/OPENOCD_VPI_TECHNICAL_GUIDE.md](../docs/OPENOCD_VPI_TECHNICAL_GUIDE.md) for protocol details.
+- File hygiene: RTL uses SystemVerilog; keep ASCII; follow existing module/interface naming. Avoid reverting user changes; prefer `make clean` before rebuild.

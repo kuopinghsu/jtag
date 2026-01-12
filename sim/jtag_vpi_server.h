@@ -101,6 +101,8 @@ private:
     uint32_t vpi_tx_bytes = 0;
     bool vpi_tx_pending = false;
     bool vpi_minimal_mode = false;  // true if using 8-byte cmd / 4-byte resp
+    MinimalVpiCmd minimal_cmd_rx;
+    uint32_t minimal_rx_bytes = 0;
 
     // TMS sequence state (OpenOCD)
     bool tms_seq_active = false;

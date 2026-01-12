@@ -25,10 +25,10 @@ module jtag_instruction_register (
         if (!rst_n) begin
             ir_shift_reg <= DEFAULT_IR;
             ir_latch     <= DEFAULT_IR;
-        end else if (shift_ir) begin
-            ir_shift_reg <= {tdi, ir_shift_reg[4:1]};
         end else if (capture_ir) begin
             ir_shift_reg <= 5'b00101;      // IR capture: LSBs = 2'b01
+        end else if (shift_ir) begin
+            ir_shift_reg <= {tdi, ir_shift_reg[4:1]};
         end else if (update_ir) begin
             ir_latch <= ir_shift_reg;
         end

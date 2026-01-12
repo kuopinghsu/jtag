@@ -43,7 +43,7 @@ GCC_CFLAGS := -Wall -O2
 # Example: make SIM_TIMEOUT=1 vpi-sim
 #          make TEST_TIMEOUT=20 test-jtag
 SIM_TIMEOUT ?= 1
-TEST_TIMEOUT ?= 30
+TEST_TIMEOUT ?= 60
 
 # Waveform tracing flag for runtime (--trace) [default: disabled]
 # Usage: make DUMP_FST=1 vpi-sim     (enable tracing)

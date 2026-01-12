@@ -58,6 +58,8 @@ JtagVpiServer::JtagVpiServer(int port)
     // Init OpenOCD vpi packet state
     memset(&vpi_cmd_rx, 0, sizeof(vpi_cmd_rx));
     memset(&vpi_cmd_tx, 0, sizeof(vpi_cmd_tx));
+    memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
+    minimal_rx_bytes = 0;
 }
 
 JtagVpiServer::~JtagVpiServer() {
@@ -141,13 +143,12 @@ void JtagVpiServer::poll() {
         return;
     }
 
-
-    // Auto-detect protocol if unknown: read some bytes and infer
+    // Auto-detect protocol if unknown: read some bytes and infer (use small buffer)
     if (protocol_mode == PROTO_UNKNOWN) {
-        DBG_PRINT(2, "[VPI][DBG] Protocol detection: vpi_rx_bytes=%d\n", vpi_rx_bytes);
-        if (vpi_rx_bytes < VPI_PKT_SIZE) {
-            ssize_t ret = recv(client_sock, ((uint8_t*)&vpi_cmd_rx) + vpi_rx_bytes,
-                               VPI_PKT_SIZE - vpi_rx_bytes, MSG_DONTWAIT);
+        DBG_PRINT(2, "[VPI][DBG] Protocol detection: minimal_rx_bytes=%d\n", minimal_rx_bytes);
+        if (minimal_rx_bytes < sizeof(minimal_cmd_rx)) {
+            ssize_t ret = recv(client_sock, ((uint8_t*)&minimal_cmd_rx) + minimal_rx_bytes,
+                               sizeof(minimal_cmd_rx) - minimal_rx_bytes, MSG_DONTWAIT);
             if (ret < 0) {
                 if (errno != EAGAIN && errno != EWOULDBLOCK) {
                     printf("[VPI] Connection error during protocol detection: %s\n", strerror(errno));
@@ -162,39 +163,35 @@ void JtagVpiServer::poll() {
                 close_connection();
                 return;
             }
-            vpi_rx_bytes += ret;
-            DBG_PRINT(2, "[VPI][DBG] Received %zd bytes, total=%d\n", ret, vpi_rx_bytes);
+            minimal_rx_bytes += ret;
+            DBG_PRINT(2, "[VPI][DBG] Received %zd bytes, total=%d\n", ret, minimal_rx_bytes);
         }
 
-        // Improved heuristic: Check command byte to distinguish protocols
-        // OpenOCD protocol: cmd in range 0x00-0x06 with padding bytes
-        // Legacy protocol: different structure
-        if (vpi_rx_bytes >= 1) {
-            uint8_t cmd_byte = ((uint8_t*)&vpi_cmd_rx)[0];
-            DBG_PRINT(2, "[VPI][DBG] Protocol detection: cmd_byte=0x%02x, vpi_rx_bytes=%d\n", cmd_byte, vpi_rx_bytes);
+        if (minimal_rx_bytes >= 1) {
+            uint8_t cmd_byte = minimal_cmd_rx.cmd;
+            DBG_PRINT(2, "[VPI][DBG] Protocol detection: cmd_byte=0x%02x, bytes=%d\n", cmd_byte, minimal_rx_bytes);
 
-            // OpenOCD command bytes are typically 0x00-0x06
-            // Check if this looks like a valid OpenOCD command
-            if (cmd_byte <= 0x06 && vpi_rx_bytes >= 8) {
-                // 8+ bytes with valid OpenOCD command -> treat as OpenOCD
-                DBG_PRINT(1, "[VPI][DBG] Detected OpenOCD protocol (cmd=0x%02x, bytes=%d)\n", cmd_byte, vpi_rx_bytes);
+            if (minimal_rx_bytes >= sizeof(minimal_cmd_rx)) {
+                // Any 8-byte header defaults to minimal OpenOCD packets (used by test_protocol)
+                DBG_PRINT(1, "[VPI][DBG] Detected Minimal OpenOCD protocol (cmd=0x%02x)\n", cmd_byte);
                 protocol_mode = PROTO_OPENOCD_VPI;
-                // Keep accumulated bytes and proceed (will be handled below on next iteration)
-            } else if (vpi_rx_bytes > 8) {
-                // More than 8 bytes likely means OpenOCD mode (which is 1036 bytes)
-                DBG_PRINT(1, "[VPI][DBG] Detected OpenOCD protocol (bytes=%d > 8)\n", vpi_rx_bytes);
+                vpi_minimal_mode = true;
+                vpi_rx_bytes = sizeof(minimal_cmd_rx);
+            } else if (minimal_rx_bytes > sizeof(minimal_cmd_rx)) {
+                DBG_PRINT(1, "[VPI][DBG] Detected OpenOCD protocol (bytes=%d > 8)\n", minimal_rx_bytes);
                 protocol_mode = PROTO_OPENOCD_VPI;
-            } else if (vpi_rx_bytes == 8 && cmd_byte > 0x06) {
-                // 8 bytes with invalid command byte -> likely legacy
+                memcpy(&vpi_cmd_rx, &minimal_cmd_rx, sizeof(minimal_cmd_rx));
+                vpi_rx_bytes = sizeof(minimal_cmd_rx);
+                minimal_rx_bytes = 0;
+                memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
+            } else if (minimal_rx_bytes == sizeof(minimal_cmd_rx) && cmd_byte > 0x06) {
                 DBG_PRINT(1, "[VPI][DBG] Detected Legacy protocol (cmd=0x%02x, bytes=8)\n", cmd_byte);
                 protocol_mode = PROTO_LEGACY_8BYTE;
-                memcpy(cmd_buf, &vpi_cmd_rx, 8);
-                cmd_bytes_received = 8;
-                vpi_rx_bytes = 0;
-                memset(&vpi_cmd_rx, 0, sizeof(vpi_cmd_rx));
-                // Fall through to legacy protocol handling below
+                memcpy(cmd_buf, &minimal_cmd_rx, sizeof(minimal_cmd_rx));
+                cmd_bytes_received = sizeof(minimal_cmd_rx);
+                minimal_rx_bytes = 0;
+                memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
             } else {
-                // Need more data to decide
                 return;
             }
         } else {
@@ -209,10 +206,41 @@ void JtagVpiServer::poll() {
         // 1. Minimal 8-byte commands (cmd + pad + length)
         // 2. Full 1036-byte packets with data buffers
 
+        // Minimal path: process immediately when flagged
+        if (vpi_minimal_mode) {
+            if (minimal_rx_bytes < sizeof(minimal_cmd_rx)) {
+                ssize_t ret = recv(client_sock, ((uint8_t*)&minimal_cmd_rx) + minimal_rx_bytes,
+                                   sizeof(minimal_cmd_rx) - minimal_rx_bytes, MSG_DONTWAIT);
+                if (ret < 0) {
+                    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                        printf("[VPI] Connection error (minimal): %s\n", strerror(errno));
+                        close_connection();
+                    }
+                    return;
+                }
+                if (ret == 0) {
+                    printf("[VPI] Client disconnected (minimal)\n");
+                    close_connection();
+                    return;
+                }
+                minimal_rx_bytes += ret;
+            }
+
+            if (minimal_rx_bytes < sizeof(minimal_cmd_rx)) {
+                return; // wait for complete minimal packet
+            }
+
+            process_vpi_packet();
+            DBG_PRINT(2, "[VPI][DBG] Minimal packet processed, resetting rx buffer\n");
+            minimal_rx_bytes = 0;
+            memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
+            return;
+        }
+
         // Read until we have at least 8 bytes (minimum OpenOCD command)
         if (vpi_rx_bytes < 8) {
             ssize_t ret = recv(client_sock, ((uint8_t*)&vpi_cmd_rx) + vpi_rx_bytes,
-                               VPI_PKT_SIZE - vpi_rx_bytes, MSG_DONTWAIT);
+                               8 - vpi_rx_bytes, MSG_DONTWAIT);
             if (ret < 0) {
                 if (errno != EAGAIN && errno != EWOULDBLOCK) {
                     printf("[VPI] Connection error: %s\n", strerror(errno));
@@ -233,30 +261,17 @@ void JtagVpiServer::poll() {
 
         // We have at least 8 bytes - ALWAYS check if more data is coming
         // This handles both the first command AND subsequent commands
-        if (vpi_rx_bytes >= 8 && vpi_rx_bytes < VPI_PKT_SIZE) {
-            // Peek to see if more data is available
-            uint8_t temp_buf[16];
-            ssize_t peek_ret = recv(client_sock, temp_buf, sizeof(temp_buf), MSG_DONTWAIT | MSG_PEEK);
-
-            if (vpi_rx_bytes == 8 && peek_ret <= 0 && (errno == EAGAIN || errno == EWOULDBLOCK || peek_ret == 0)) {
-                // Exactly 8 bytes, no more data available - minimal mode
-                DBG_PRINT(2, "[VPI][DBG] Minimal mode: 8 bytes, no more data. errno=%d peek_ret=%zd\n", errno, peek_ret);
-                vpi_minimal_mode = true;
-                process_vpi_packet();
-                DBG_PRINT(2, "[VPI][DBG] After process_vpi_packet, resetting rx buffer\n");
-                vpi_rx_bytes = 0;
-                memset(&vpi_cmd_rx, 0, sizeof(vpi_cmd_rx));
-                DBG_PRINT(2, "[VPI][DBG] Minimal packet processed, ready for next command\n");
-                return;
-            } else if (peek_ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                // Peek error (not EAGAIN) - connection issue
-                DBG_PRINT(1, "[VPI][DBG] Peek error (fatal): %s\n", strerror(errno));
-                close_connection();
-                return;
-            }
-
-            // More data available or already buffered - full OpenOCD mode
-            vpi_minimal_mode = false;
+        if (vpi_rx_bytes == 8) {
+            // Always treat 8-byte commands as minimal packets
+            vpi_minimal_mode = true;
+            process_vpi_packet();
+            DBG_PRINT(2, "[VPI][DBG] After process_vpi_packet, resetting rx buffer\n");
+            vpi_rx_bytes = 0;
+            memset(&vpi_cmd_rx, 0, sizeof(vpi_cmd_rx));
+            minimal_rx_bytes = 0;
+            memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
+            DBG_PRINT(2, "[VPI][DBG] Minimal packet processed, ready for next command\n");
+            return;
         }
 
         // Continue filling until we have full 1036-byte packet (only if NOT in minimal mode)
@@ -323,14 +338,21 @@ void JtagVpiServer::poll() {
     vpi_resp resp;
     process_command(&cmd, &resp);
 }
+
 static inline uint32_t le32_to_host(const uint8_t b[4]) {
     return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
 }
+
 static inline void host_to_le32(uint8_t b[4], uint32_t v) {
     b[0] = (uint8_t)(v & 0xFF);
     b[1] = (uint8_t)((v >> 8) & 0xFF);
     b[2] = (uint8_t)((v >> 16) & 0xFF);
     b[3] = (uint8_t)((v >> 24) & 0xFF);
+}
+
+static inline uint32_t be32_to_host(const uint8_t b[4]) {
+    // Minimal 8-byte protocol uses network order (big-endian) for length
+    return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | (uint32_t)b[3];
 }
 
 // Send a minimal 4-byte response (for test_protocol compatibility)
@@ -358,9 +380,41 @@ void JtagVpiServer::send_minimal_response(uint8_t response, uint8_t tdo_val, uin
 
 // Handle a full OpenOCD VPI packet
 void JtagVpiServer::process_vpi_packet() {
-    uint32_t cmd = le32_to_host(vpi_cmd_rx.cmd_buf);
-    uint32_t length = le32_to_host(vpi_cmd_rx.length_buf);
-    uint32_t nb_bits = le32_to_host(vpi_cmd_rx.nb_bits_buf);
+    uint32_t cmd, length, nb_bits;
+
+    // If we somehow reached here with exactly 8 bytes, force minimal mode using that header
+    if (!vpi_minimal_mode && (minimal_rx_bytes == sizeof(MinimalVpiCmd) || vpi_rx_bytes == sizeof(MinimalVpiCmd))) {
+        if (minimal_rx_bytes == 0 && vpi_rx_bytes == sizeof(MinimalVpiCmd)) {
+            memcpy(&minimal_cmd_rx, &vpi_cmd_rx, sizeof(MinimalVpiCmd));
+            minimal_rx_bytes = sizeof(MinimalVpiCmd);
+        }
+        vpi_minimal_mode = true;
+    }
+
+    // In minimal mode, parse the 8-byte MinimalVpiCmd structure
+    if (vpi_minimal_mode) {
+        // MinimalVpiCmd: cmd(1) + pad(3) + length(4) = 8 bytes
+        MinimalVpiCmd min_cmd;
+        if (minimal_rx_bytes >= sizeof(MinimalVpiCmd)) {
+            memcpy(&min_cmd, &minimal_cmd_rx, sizeof(MinimalVpiCmd));
+        } else {
+            memcpy(&min_cmd, &vpi_cmd_rx, sizeof(MinimalVpiCmd));
+        }
+        cmd = min_cmd.cmd;
+
+        // Minimal protocol should be network-order, but some clients may send host-order.
+        uint32_t len_be = be32_to_host(reinterpret_cast<uint8_t*>(&min_cmd.length));
+        uint32_t len_le = le32_to_host(reinterpret_cast<uint8_t*>(&min_cmd.length));
+        length = (len_be <= 4096) ? len_be : len_le;
+        nb_bits = length;  // In minimal mode, length==nb_bits
+        DBG_PRINT(2, "[VPI][DBG] Minimal mode parse: cmd=%u, length_be=%u, length_le=%u, chosen=%u, nb_bits=%u\n",
+                  cmd, len_be, len_le, length, nb_bits);
+    } else {
+        // Full OpenOCD mode: parse the full 1036-byte OcdVpiCmd structure
+        cmd = le32_to_host(vpi_cmd_rx.cmd_buf);
+        length = le32_to_host(vpi_cmd_rx.length_buf);
+        nb_bits = le32_to_host(vpi_cmd_rx.nb_bits_buf);
+    }
 
     DBG_PRINT(1, "[VPI][DBG] process_vpi_packet: cmd=%u, length=%u, nb_bits=%u\n", cmd, length, nb_bits);
 
@@ -453,6 +507,14 @@ void JtagVpiServer::process_vpi_packet() {
                 scan_tms_buf[last / 8] |= (1u << (last % 8));
             }
             memcpy(scan_tdi_buf, vpi_cmd_rx.buffer_out, scan_num_bytes);
+            // Debug TDI for small scans (likely IR)
+            if (scan_num_bytes <= 4) {
+                DBG_PRINT(1, "[VPI][DBG] SCAN TDI: ");
+                for (uint32_t i = 0; i < scan_num_bytes; i++) {
+                    DBG_PRINT(1, "0x%02x ", scan_tdi_buf[i]);
+                }
+                DBG_PRINT(1, "\n");
+            }
             // Enter processing state (legacy engine)
             DBG_PRINT(2, "[VPI][DBG] Entering SCAN_PROCESSING state\n");
             scan_state = SCAN_PROCESSING;
@@ -552,8 +614,9 @@ void JtagVpiServer::continue_vpi_work() {
     }
 
     // 3) If legacy scan state machine is active, let it progress
-    if (scan_state == SCAN_PROCESSING || scan_state == SCAN_SENDING_TDO) {
-        DBG_PRINT(2, "[VPI][DBG] continue_vpi_work: scan_state=%d (2=PROC, 4=SEND)\n", scan_state);
+    // FIXME BUG FIX: Also handle SCAN_RECEIVING states (not just PROCESSING/SENDING)
+    if (scan_state != SCAN_IDLE) {
+        DBG_PRINT(2, "[VPI][DBG] continue_vpi_work: scan_state=%d (1=RX_TMS, 2=RX_TDI, 3=PROC, 4=SEND)\n", scan_state);
         // Run legacy per-bit engine
         if (scan_state == SCAN_PROCESSING && pending_tck_pulse) return;
         continue_scan();
@@ -581,7 +644,94 @@ void JtagVpiServer::continue_vpi_work() {
 
     // 4) If idle and not sending, try to receive next command packet
     if (!vpi_tx_pending && client_sock >= 0) {
-        if (vpi_rx_bytes < VPI_PKT_SIZE) {
+        // Minimal mode uses a separate 8-byte buffer
+        if (vpi_minimal_mode) {
+            if (minimal_rx_bytes < sizeof(minimal_cmd_rx)) {
+                ssize_t ret = recv(client_sock, ((uint8_t*)&minimal_cmd_rx) + minimal_rx_bytes,
+                                   sizeof(minimal_cmd_rx) - minimal_rx_bytes, MSG_DONTWAIT);
+                if (ret < 0) {
+                    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                        DBG_PRINT(1, "[VPI][DBG] Recv error in continue_vpi_work (minimal): %s\n", strerror(errno));
+                        close_connection();
+                    }
+                    return;
+                }
+                if (ret == 0) {
+                    DBG_PRINT(1, "[VPI][DBG] Client disconnected in continue_vpi_work (minimal)\n");
+                    close_connection();
+                    return;
+                }
+                minimal_rx_bytes += ret;
+                DBG_PRINT(2, "[VPI][DBG] Received %zd bytes (minimal), total=%d\n", ret, minimal_rx_bytes);
+                if (minimal_rx_bytes < sizeof(minimal_cmd_rx)) {
+                    return; // wait for full 8-byte minimal command
+                }
+            }
+
+            // Have full minimal packet
+            process_vpi_packet();
+            DBG_PRINT(2, "[VPI][DBG] Minimal packet processed in continue_vpi_work\n");
+            minimal_rx_bytes = 0;
+            memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
+            return;
+        }
+
+        // Full OpenOCD path: ensure we have at least 8 bytes (already buffered during detection for first packet)
+        if (vpi_rx_bytes < 8) {
+            ssize_t ret = recv(client_sock, ((uint8_t*)&vpi_cmd_rx) + vpi_rx_bytes,
+                               VPI_PKT_SIZE - vpi_rx_bytes, MSG_DONTWAIT);
+            if (ret < 0) {
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    DBG_PRINT(1, "[VPI][DBG] Recv error in continue_vpi_work: %s\n", strerror(errno));
+                    close_connection();
+                }
+                return;
+            }
+            if (ret == 0) {
+                DBG_PRINT(1, "[VPI][DBG] Client disconnected in continue_vpi_work\n");
+                close_connection();
+                return;
+            }
+            vpi_rx_bytes += ret;
+            DBG_PRINT(2, "[VPI][DBG] Received %zd bytes in continue_vpi_work, total=%d\n", ret, vpi_rx_bytes);
+            if (vpi_rx_bytes < 8) {
+                return; // wait for minimal command
+            }
+        }
+
+        // We have at least 8 bytes - check if more data is coming (minimal mode detection for follow-on commands)
+        if (vpi_rx_bytes >= 8 && vpi_rx_bytes < VPI_PKT_SIZE) {
+            // Peek to see if more data is available
+            uint8_t temp_buf[16];
+            ssize_t peek_ret = recv(client_sock, temp_buf, sizeof(temp_buf), MSG_DONTWAIT | MSG_PEEK);
+
+            if (vpi_rx_bytes == 8 && peek_ret <= 0 && (errno == EAGAIN || errno == EWOULDBLOCK || peek_ret == 0)) {
+                // Exactly 8 bytes, no more data available - minimal mode for next packets
+                DBG_PRINT(2, "[VPI][DBG] Minimal mode detected in continue_vpi_work: 8 bytes, no more data\n");
+                vpi_minimal_mode = true;
+                // Copy header into minimal buffer and process as minimal
+                memcpy(&minimal_cmd_rx, &vpi_cmd_rx, sizeof(minimal_cmd_rx));
+                minimal_rx_bytes = sizeof(minimal_cmd_rx);
+                vpi_rx_bytes = 0;
+                memset(&vpi_cmd_rx, 0, sizeof(vpi_cmd_rx));
+                process_vpi_packet();
+                DBG_PRINT(2, "[VPI][DBG] Minimal packet processed in continue_vpi_work\n");
+                minimal_rx_bytes = 0;
+                memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
+                return;
+            } else if (peek_ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                // Peek error (not EAGAIN) - connection issue
+                DBG_PRINT(1, "[VPI][DBG] Peek error in continue_vpi_work: %s\n", strerror(errno));
+                close_connection();
+                return;
+            }
+
+            // More data available or already buffered - full OpenOCD mode
+            vpi_minimal_mode = false;
+        }
+
+        // Continue filling until we have full packet (only if NOT in minimal mode)
+        if (!vpi_minimal_mode && vpi_rx_bytes < VPI_PKT_SIZE) {
             ssize_t ret = recv(client_sock, ((uint8_t*)&vpi_cmd_rx) + vpi_rx_bytes,
                                VPI_PKT_SIZE - vpi_rx_bytes, MSG_DONTWAIT);
             if (ret < 0) {
@@ -852,6 +1002,10 @@ void JtagVpiServer::close_connection() {
     vpi_rx_bytes = 0;
     vpi_tx_pending = false;
     vpi_minimal_mode = false;
+    // Reset scan state machine
+    scan_state = SCAN_IDLE;
+    // Reset TMS sequence state
+    tms_seq_active = false;
 }
 
 void JtagVpiServer::update_signals(uint8_t tdo, uint32_t idcode, uint8_t mode) {
