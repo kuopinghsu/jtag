@@ -14,6 +14,10 @@
 #include <fcntl.h>
 #include <errno.h>
 
+// Debug macros - controlled by debug_level
+#define DBG_PRINT(level, ...) \
+    do { if (debug_level >= (level)) { printf(__VA_ARGS__); fflush(stdout); } } while(0)
+
 // Legacy 8-byte protocol structures (kept for backwards-compat tests)
 // Command format (8 bytes)
 struct vpi_cmd {
@@ -47,6 +51,7 @@ JtagVpiServer::JtagVpiServer(int port)
     current_tdo = 0;
     current_idcode = 0;
     current_mode = 0;
+    debug_level = 0;  // Default: no debug output
     // Initialize command buffer
     memset(cmd_buf, 0, sizeof(cmd_buf));
     cmd_bytes_received = 0;
@@ -129,7 +134,7 @@ void JtagVpiServer::poll() {
         continue_scan();
         return;
     }
-    
+
     if (protocol_mode == PROTO_OPENOCD_VPI) {
         continue_vpi_work();
         return;
@@ -138,22 +143,26 @@ void JtagVpiServer::poll() {
 
     // Auto-detect protocol if unknown: read some bytes and infer
     if (protocol_mode == PROTO_UNKNOWN) {
+        DBG_PRINT(2, "[VPI][DBG] Protocol detection: vpi_rx_bytes=%d\n", vpi_rx_bytes);
         if (vpi_rx_bytes < VPI_PKT_SIZE) {
             ssize_t ret = recv(client_sock, ((uint8_t*)&vpi_cmd_rx) + vpi_rx_bytes,
                                VPI_PKT_SIZE - vpi_rx_bytes, MSG_DONTWAIT);
             if (ret < 0) {
                 if (errno != EAGAIN && errno != EWOULDBLOCK) {
                     printf("[VPI] Connection error during protocol detection: %s\n", strerror(errno));
+                    fflush(stdout);
                     close_connection();
                 }
                 return;
             }
             if (ret == 0) {
                 printf("[VPI] Client disconnected during protocol detection\n");
+                fflush(stdout);
                 close_connection();
                 return;
             }
             vpi_rx_bytes += ret;
+            DBG_PRINT(2, "[VPI][DBG] Received %zd bytes, total=%d\n", ret, vpi_rx_bytes);
         }
 
         // Improved heuristic: Check command byte to distinguish protocols
@@ -161,18 +170,22 @@ void JtagVpiServer::poll() {
         // Legacy protocol: different structure
         if (vpi_rx_bytes >= 1) {
             uint8_t cmd_byte = ((uint8_t*)&vpi_cmd_rx)[0];
-            
+            DBG_PRINT(2, "[VPI][DBG] Protocol detection: cmd_byte=0x%02x, vpi_rx_bytes=%d\n", cmd_byte, vpi_rx_bytes);
+
             // OpenOCD command bytes are typically 0x00-0x06
             // Check if this looks like a valid OpenOCD command
             if (cmd_byte <= 0x06 && vpi_rx_bytes >= 8) {
                 // 8+ bytes with valid OpenOCD command -> treat as OpenOCD
+                DBG_PRINT(1, "[VPI][DBG] Detected OpenOCD protocol (cmd=0x%02x, bytes=%d)\n", cmd_byte, vpi_rx_bytes);
                 protocol_mode = PROTO_OPENOCD_VPI;
                 // Keep accumulated bytes and proceed (will be handled below on next iteration)
             } else if (vpi_rx_bytes > 8) {
                 // More than 8 bytes likely means OpenOCD mode (which is 1036 bytes)
+                DBG_PRINT(1, "[VPI][DBG] Detected OpenOCD protocol (bytes=%d > 8)\n", vpi_rx_bytes);
                 protocol_mode = PROTO_OPENOCD_VPI;
             } else if (vpi_rx_bytes == 8 && cmd_byte > 0x06) {
                 // 8 bytes with invalid command byte -> likely legacy
+                DBG_PRINT(1, "[VPI][DBG] Detected Legacy protocol (cmd=0x%02x, bytes=8)\n", cmd_byte);
                 protocol_mode = PROTO_LEGACY_8BYTE;
                 memcpy(cmd_buf, &vpi_cmd_rx, 8);
                 cmd_bytes_received = 8;
@@ -194,7 +207,7 @@ void JtagVpiServer::poll() {
         // OpenOCD mode can accept both:
         // 1. Minimal 8-byte commands (cmd + pad + length)
         // 2. Full 1036-byte packets with data buffers
-        
+
         // Read until we have at least 8 bytes (minimum OpenOCD command)
         if (vpi_rx_bytes < 8) {
             ssize_t ret = recv(client_sock, ((uint8_t*)&vpi_cmd_rx) + vpi_rx_bytes,
@@ -216,35 +229,35 @@ void JtagVpiServer::poll() {
                 return; // wait for rest of minimal command
             }
         }
-        
+
         // We have at least 8 bytes - ALWAYS check if more data is coming
         // This handles both the first command AND subsequent commands
         if (vpi_rx_bytes >= 8 && vpi_rx_bytes < VPI_PKT_SIZE) {
             // Peek to see if more data is available
             uint8_t temp_buf[16];
             ssize_t peek_ret = recv(client_sock, temp_buf, sizeof(temp_buf), MSG_DONTWAIT | MSG_PEEK);
-            
+
             if (vpi_rx_bytes == 8 && peek_ret <= 0 && (errno == EAGAIN || errno == EWOULDBLOCK || peek_ret == 0)) {
                 // Exactly 8 bytes, no more data available - minimal mode
-                printf("[VPI][DBG] Minimal mode: 8 bytes, no more data. errno=%d peek_ret=%zd\n", errno, peek_ret);
+                DBG_PRINT(2, "[VPI][DBG] Minimal mode: 8 bytes, no more data. errno=%d peek_ret=%zd\n", errno, peek_ret);
                 vpi_minimal_mode = true;
                 process_vpi_packet();
-                printf("[VPI][DBG] After process_vpi_packet, resetting rx buffer\n");
+                DBG_PRINT(2, "[VPI][DBG] After process_vpi_packet, resetting rx buffer\n");
                 vpi_rx_bytes = 0;
                 memset(&vpi_cmd_rx, 0, sizeof(vpi_cmd_rx));
-                printf("[VPI][DBG] Minimal packet processed, ready for next command\n");
+                DBG_PRINT(2, "[VPI][DBG] Minimal packet processed, ready for next command\n");
                 return;
             } else if (peek_ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
                 // Peek error (not EAGAIN) - connection issue
-                printf("[VPI][DBG] Peek error (fatal): %s\n", strerror(errno));
+                DBG_PRINT(1, "[VPI][DBG] Peek error (fatal): %s\n", strerror(errno));
                 close_connection();
                 return;
             }
-            
+
             // More data available or already buffered - full OpenOCD mode
             vpi_minimal_mode = false;
         }
-        
+
         // Continue filling until we have full 1036-byte packet (only if NOT in minimal mode)
         if (!vpi_minimal_mode && vpi_rx_bytes < VPI_PKT_SIZE) {
             ssize_t ret = recv(client_sock, ((uint8_t*)&vpi_cmd_rx) + vpi_rx_bytes,
@@ -268,7 +281,9 @@ void JtagVpiServer::poll() {
         }
 
         // Full packet received
+        DBG_PRINT(2, "[VPI][DBG] Full VPI packet received, processing...\n");
         process_vpi_packet();
+        DBG_PRINT(2, "[VPI][DBG] Packet processed, resetting buffer\n");
         vpi_rx_bytes = 0;
         memset(&vpi_cmd_rx, 0, sizeof(vpi_cmd_rx));
         return;
@@ -324,11 +339,11 @@ void JtagVpiServer::send_minimal_response(uint8_t response, uint8_t tdo_val, uin
     resp.tdo_val = tdo_val;
     resp.mode = mode;
     resp.status = status;
-    
+
     // Send with blocking retry loop (client socket is non-blocking)
     size_t sent_total = 0;
     while (sent_total < sizeof(resp)) {
-        ssize_t sent = send(client_sock, ((uint8_t*)&resp) + sent_total, 
+        ssize_t sent = send(client_sock, ((uint8_t*)&resp) + sent_total,
                            sizeof(resp) - sent_total, 0);
         if (sent > 0) {
             sent_total += sent;
@@ -346,19 +361,29 @@ void JtagVpiServer::process_vpi_packet() {
     uint32_t length = le32_to_host(vpi_cmd_rx.length_buf);
     uint32_t nb_bits = le32_to_host(vpi_cmd_rx.nb_bits_buf);
 
+    DBG_PRINT(1, "[VPI][DBG] process_vpi_packet: cmd=%u, length=%u, nb_bits=%u\n", cmd, length, nb_bits);
+
     switch (cmd) {
         case 0: { // CMD_RESET
             reset_pulses_remaining = 6;
             pending_tms = 1;
             pending_tdi = 0;
             pending_tck_pulse = true;
-            
+
             // Send immediate response for minimal mode
             if (vpi_minimal_mode) {
                 send_minimal_response(0x00, 0, current_mode, 0);
                 // Clear any pending operations so next command can proceed cleanly
                 reset_pulses_remaining = 0;
                 pending_tck_pulse = false;
+            } else {
+                // Full OpenOCD mode - send empty response packet
+                memset(&vpi_cmd_tx, 0, sizeof(vpi_cmd_tx));
+                host_to_le32(vpi_cmd_tx.cmd_buf, cmd);
+                host_to_le32(vpi_cmd_tx.length_buf, 0);
+                host_to_le32(vpi_cmd_tx.nb_bits_buf, 0);
+                vpi_tx_pending = true;
+                vpi_tx_bytes = 0;
             }
             break;
         }
@@ -370,6 +395,16 @@ void JtagVpiServer::process_vpi_packet() {
             uint32_t nb_bytes = (nb_bits + 7) / 8;
             if (nb_bytes > sizeof(tms_seq_buf)) nb_bytes = sizeof(tms_seq_buf);
             memcpy(tms_seq_buf, vpi_cmd_rx.buffer_out, nb_bytes);
+
+            // Send response packet
+            if (!vpi_minimal_mode) {
+                memset(&vpi_cmd_tx, 0, sizeof(vpi_cmd_tx));
+                host_to_le32(vpi_cmd_tx.cmd_buf, cmd);
+                host_to_le32(vpi_cmd_tx.length_buf, 0);
+                host_to_le32(vpi_cmd_tx.nb_bits_buf, 0);
+                vpi_tx_pending = true;
+                vpi_tx_bytes = 0;
+            }
             break;
         }
         case 2: // CMD_SCAN_CHAIN
@@ -380,7 +415,7 @@ void JtagVpiServer::process_vpi_packet() {
                 send_minimal_response(0x00, current_tdo, current_mode, 0);
                 break;
             }
-            
+
             // In minimal mode, use legacy-style protocol (send response, then TMS/TDI/TDO exchange)
             if (vpi_minimal_mode) {
                 // Send immediate response
@@ -400,8 +435,9 @@ void JtagVpiServer::process_vpi_packet() {
                 scan_state = SCAN_RECEIVING_TMS;
                 break;
             }
-            
+
             // Full OpenOCD VPI mode: Initialize scan using RX data; reuse legacy scan state machine
+            DBG_PRINT(1, "[VPI][DBG] SCAN command: nb_bits=%u, cmd=%u (flip_tms=%d)\n", nb_bits, cmd, (cmd == 3));
             scan_num_bits = nb_bits;
             scan_num_bytes = (nb_bits + 7) / 8;
             scan_bit_index = 0;
@@ -416,6 +452,7 @@ void JtagVpiServer::process_vpi_packet() {
             }
             memcpy(scan_tdi_buf, vpi_cmd_rx.buffer_out, scan_num_bytes);
             // Enter processing state (legacy engine)
+            DBG_PRINT(2, "[VPI][DBG] Entering SCAN_PROCESSING state\n");
             scan_state = SCAN_PROCESSING;
             // Prepare TX packet header for when we send the response
             memset(&vpi_cmd_tx, 0, sizeof(vpi_cmd_tx));
@@ -484,7 +521,9 @@ void JtagVpiServer::continue_vpi_work() {
                             VPI_PKT_SIZE - vpi_tx_bytes, MSG_DONTWAIT);
         if (sent > 0) {
             vpi_tx_bytes += sent;
+            DBG_PRINT(2, "[VPI][DBG] Sent %zd bytes, total=%d/%d\n", sent, vpi_tx_bytes, VPI_PKT_SIZE);
             if (vpi_tx_bytes >= VPI_PKT_SIZE) {
+                DBG_PRINT(1, "[VPI][DBG] Response packet sent completely\n");
                 vpi_tx_pending = false;
                 vpi_tx_bytes = 0;
             }
@@ -742,7 +781,7 @@ void JtagVpiServer::continue_scan() {
 }
 
 void JtagVpiServer::close_connection() {
-    printf("[VPI][DBG] Closing connection\n");
+    DBG_PRINT(1, "[VPI][DBG] Closing connection\n");
     if (client_sock >= 0) {
         close(client_sock);
         client_sock = -1;

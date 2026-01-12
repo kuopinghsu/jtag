@@ -27,6 +27,7 @@ public:
     bool is_client_connected() const { return client_sock >= 0; }
     void set_msb_first(bool v) { msb_first = v; }
     void set_protocol_mode(ProtocolMode m) { protocol_mode = m; }
+    void set_debug_level(int level) { debug_level = level; }
 
 private:
     // OpenOCD jtag_vpi protocol (packed) structure size: 1036 bytes
@@ -66,6 +67,7 @@ private:
     uint32_t current_idcode;
     uint8_t current_mode;
     bool msb_first;
+    int debug_level;  // 0=off, 1=basic, 2=verbose
 
     // Pending commands from client
     uint8_t pending_tms;

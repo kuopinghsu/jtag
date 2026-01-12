@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     std::cout << "[VPI] Connect using: ./build/jtag_vpi_client" << std::endl;
 
     // Parse command line arguments
-    
+
 #if ENABLE_FST
     VerilatedFstC* trace = nullptr;
 #endif
@@ -64,6 +64,7 @@ int main(int argc, char** argv) {
     bool msb_first = false;    // Default: LSB-first bit packing
     std::string proto_mode = "auto"; // Default: auto-detect protocol
     uint64_t timeout_seconds = DEFAULT_TIMEOUT_SECONDS;
+    int debug_level = 0;  // Default: no debug output
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -88,6 +89,15 @@ int main(int argc, char** argv) {
         } else if (arg.substr(0, 10) == "--timeout=") {
             // Format: --timeout=60
             timeout_seconds = std::stoull(arg.substr(10));
+        } else if (arg == "--debug" && i + 1 < argc) {
+            // Format: --debug 1 or --debug 2
+            debug_level = std::stoi(argv[++i]);
+        } else if (arg.rfind("--debug=", 0) == 0) {
+            // Format: --debug=1
+            debug_level = std::stoi(arg.substr(8));
+        } else if (arg == "-d" && i + 1 < argc) {
+            // Format: -d 1
+            debug_level = std::stoi(argv[++i]);
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "\nUsage: " << argv[0] << " [options]" << std::endl;
             std::cout << "Options:" << std::endl;
@@ -98,6 +108,8 @@ int main(int argc, char** argv) {
             std::cout << "  --quiet, -q              Suppress cycle status messages" << std::endl;
             std::cout << "  --verbose, -v            Show cycle status messages (default)" << std::endl;
             std::cout << "  --proto <mode>           Protocol: auto | openocd | legacy (default: auto)" << std::endl;
+            std::cout << "  --debug <level>          Debug output: 0=off, 1=basic, 2=verbose (default: 0)" << std::endl;
+            std::cout << "  -d <level>               Short form of --debug" << std::endl;
             std::cout << "  --help, -h               Show this help message" << std::endl;
             delete top;
             return 0;
@@ -116,6 +128,11 @@ int main(int argc, char** argv) {
     top->mode_select = cjtag_mode ? 1 : 0;
     // Configure VPI server bit order
     vpi_server.set_msb_first(msb_first);
+    // Configure debug level
+    vpi_server.set_debug_level(debug_level);
+    if (debug_level > 0) {
+        std::cout << "[SIM] Debug level: " << debug_level << std::endl;
+    }
     // Configure protocol mode
     if (proto_mode == "openocd") {
         vpi_server.set_protocol_mode(JtagVpiServer::PROTO_OPENOCD_VPI);
@@ -145,7 +162,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 10; i++) {
         top->clk = !top->clk;
         top->eval();
-        
+
     #if ENABLE_FST
         if (trace) trace->dump(contextp->time());
     #endif
@@ -154,6 +171,12 @@ int main(int argc, char** argv) {
     top->rst_n = 1;
     top->jtag_trst_n_i = 1;
     std::cout << "[SIM] Reset released" << std::endl;
+
+    std::cout << "[SIM] Cycle: " << cycle_count
+              << " | IDCODE: 0x" << std::hex << top->idcode
+              << " | Mode: cfg=" << (cjtag_mode ? "cJTAG" : "JTAG")
+              << " active=" << (top->active_mode ? "cJTAG" : "JTAG")
+              << std::dec << std::endl;
 
     // Main simulation loop
     while (!contextp->gotFinish()) {
@@ -264,8 +287,8 @@ int main(int argc, char** argv) {
                 }
             }
 
-            // Print status every 10000 cycles
-            if (verbose && (cycle_count - last_status) >= 10000) {
+            // Print status every 20000000 cycles (20M cycles = less frequent logging)
+            if (verbose && (cycle_count - last_status) >= 20000000) {
                 std::cout << "[SIM] Cycle: " << cycle_count
                           << " | IDCODE: 0x" << std::hex << top->idcode
                           << " | Mode: cfg=" << (cjtag_mode ? "cJTAG" : "JTAG")
@@ -278,7 +301,7 @@ int main(int argc, char** argv) {
         top->eval();
 
         // Dump trace
-        
+
 #if ENABLE_FST
         if (trace) {
             trace->dump(contextp->time());
@@ -298,7 +321,7 @@ int main(int argc, char** argv) {
     }
 
     // Cleanup
-    
+
 #if ENABLE_FST
     if (trace) {
         trace->close();

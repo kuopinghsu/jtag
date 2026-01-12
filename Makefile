@@ -52,6 +52,12 @@ DUMP_FST ?= 0
 TRACE_OPT := $(if $(filter 1 yes true TRUE on ON,$(DUMP_FST)),--trace,)
 TRACE_STATE := $(if $(TRACE_OPT),enabled,disabled)
 
+# Debug level for VPI server (0=off, 1=basic, 2=verbose) [default: 0]
+# Usage: make DEBUG=1 test-jtag      (basic debug)
+#        make DEBUG=2 vpi-sim         (verbose debug)
+DEBUG ?= 0
+DEBUG_OPT := $(if $(filter-out 0,$(DEBUG)),--debug=$(DEBUG),)
+
 all: help
 
 help:
@@ -87,6 +93,14 @@ help:
 	@echo "Configurable timeouts:"
 	@echo "  SIM_TIMEOUT   (default: $(SIM_TIMEOUT)s) for vpi-sim targets"
 	@echo "  TEST_TIMEOUT  (default: $(TEST_TIMEOUT)s) for test-* targets"
+	@echo ""
+	@echo "Configurable options:"
+	@echo "  DUMP_FST      (0|1, default: $(DUMP_FST)) - Enable FST waveform tracing"
+	@echo "  DEBUG         (0|1|2, default: $(DEBUG)) - VPI debug level (0=off, 1=basic, 2=verbose)"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make DEBUG=1 test-jtag          (test with basic debug output)"
+	@echo "  make DEBUG=2 DUMP_FST=1 vpi-sim (verbose debug + waveform tracing)"
 	@echo "Configurable tracing:"
 	@echo "  DUMP_FST      (default: $(DUMP_FST)) waveform tracing is $(TRACE_STATE)"
 	@echo "  ENABLE_FST    (default: $(ENABLE_FST)) build-time FST support"
@@ -235,7 +249,7 @@ vpi-sim-openocd: $(BUILD_DIR)/jtag_vpi
 	@echo "Trace: $(TRACE_STATE)"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(SIM_TIMEOUT) --proto=openocd
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(SIM_TIMEOUT) --proto=openocd
 
 vpi-sim-legacy: $(BUILD_DIR)/jtag_vpi
 	@echo ""
@@ -246,7 +260,7 @@ vpi-sim-legacy: $(BUILD_DIR)/jtag_vpi
 	@echo "Trace: $(TRACE_STATE)"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(SIM_TIMEOUT) --proto=legacy
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(SIM_TIMEOUT) --proto=legacy
 
 vpi-sim-auto: $(BUILD_DIR)/jtag_vpi
 	@echo ""
@@ -257,7 +271,7 @@ vpi-sim-auto: $(BUILD_DIR)/jtag_vpi
 	@echo "Trace: $(TRACE_STATE)"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(SIM_TIMEOUT) --proto=auto
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(SIM_TIMEOUT) --proto=auto
 
 # Interactive VPI simulation target (runs foreground, auto-detect protocol)
 vpi-sim: vpi-sim-auto
@@ -270,7 +284,7 @@ test-vpi: $(BUILD_DIR)/jtag_vpi client
 	@pkill -9 jtag_vpi 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in background..."
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(TEST_TIMEOUT) > vpi_sim.log 2>&1 & \
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) > vpi_sim.log 2>&1 & \
 		SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \
 		sleep 2; \
@@ -300,11 +314,15 @@ test-jtag: $(BUILD_DIR)/jtag_vpi
 	@pkill -9 jtag_vpi openocd 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in JTAG mode..."
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(TEST_TIMEOUT) > vpi_jtag.log 2>&1 & \
-		SERVER_PID=$$!; \
-		echo "VPI server PID: $$SERVER_PID"; \
-		sleep 3; \
-		if ! kill -0 $$SERVER_PID 2>/dev/null; then \
+	@if [ "$(DEBUG)" != "0" ] && [ -n "$(DEBUG)" ]; then \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) 2>&1 | tee vpi_jtag.log & \
+	else \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) > vpi_jtag.log 2>&1 & \
+	fi; \
+	SERVER_PID=$$!; \
+	echo "VPI server PID: $$SERVER_PID"; \
+	sleep 3; \
+	if ! kill -0 $$SERVER_PID 2>/dev/null; then \
 			echo "✗ VPI server failed to start"; \
 			echo "Check vpi_jtag.log for details"; \
 			exit 1; \
@@ -340,8 +358,12 @@ test-cjtag: $(BUILD_DIR)/jtag_vpi
 	@pkill -9 jtag_vpi openocd 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in cJTAG mode..."
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(TEST_TIMEOUT) --cjtag > vpi_cjtag.log 2>&1 & \
-		SERVER_PID=$$!; \
+	@if [ "$(DEBUG)" != "0" ] && [ -n "$(DEBUG)" ]; then \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) --cjtag 2>&1 | tee vpi_cjtag.log & \
+	else \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) --cjtag > vpi_cjtag.log 2>&1 & \
+	fi; \
+	SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \
 		sleep 3; \
 		if ! kill -0 $$SERVER_PID 2>/dev/null; then \
@@ -386,8 +408,12 @@ test-legacy: $(BUILD_DIR)/jtag_vpi
 	@pkill -9 jtag_vpi 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in legacy protocol mode..."
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(TEST_TIMEOUT) --proto=legacy > vpi_legacy.log 2>&1 & \
-		SERVER_PID=$$!; \
+	@if [ "$(DEBUG)" != "0" ] && [ -n "$(DEBUG)" ]; then \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) --proto=legacy 2>&1 | tee vpi_legacy.log & \
+	else \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) --proto=legacy > vpi_legacy.log 2>&1 & \
+	fi; \
+	SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \
 		sleep 3; \
 		if ! kill -0 $$SERVER_PID 2>/dev/null; then \

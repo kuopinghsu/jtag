@@ -23,7 +23,7 @@ int main(int argc, char** argv) {
     Vjtag_tb* top = new Vjtag_tb{contextp.get()};
 
     // Enable waveform tracing if requested
-    
+
 #if ENABLE_FST
     VerilatedFstC* trace = NULL;
     if (argc > 1 && std::string(argv[1]) == "--trace") {
@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
     }
 
     // Cleanup
-    
+
 #if ENABLE_FST
     if (trace) {
         trace->close();

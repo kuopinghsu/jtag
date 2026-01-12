@@ -23,7 +23,7 @@ int main(int argc, char** argv) {
     Vsystem_tb* top = new Vsystem_tb{contextp.get()};
 
     // Enable waveform tracing if requested
-    
+
 #if ENABLE_FST
     VerilatedFstC* trace = NULL;
     if (argc > 1 && std::string(argv[1]) == "--trace") {
@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     while (!contextp->gotFinish()) {
         top->eval();
 
-        
+
 #if ENABLE_FST
         if (trace) {
             trace->dump(contextp->time());
@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
     std::cout << "Total simulation time: " << contextp->time() << " ns" << std::endl;
 
     // Cleanup
-    
+
 #if ENABLE_FST
     if (trace) {
         trace->close();
