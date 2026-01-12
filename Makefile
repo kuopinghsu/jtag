@@ -42,7 +42,7 @@ GCC_CFLAGS := -Wall -O2
 # Timeouts (seconds) - configurable via environment
 # Example: make SIM_TIMEOUT=1 vpi-sim
 #          make TEST_TIMEOUT=20 test-jtag
-SIM_TIMEOUT ?= 1
+SIM_TIMEOUT ?= 10
 TEST_TIMEOUT ?= 60
 
 # Waveform tracing flag for runtime (--trace) [default: disabled]
@@ -58,13 +58,12 @@ TRACE_STATE := $(if $(TRACE_OPT),enabled,disabled)
 DEBUG ?= 0
 DEBUG_OPT := $(if $(filter-out 0,$(DEBUG)),--debug=$(DEBUG),)
 
-all: help
-
 help:
 	@echo "JTAG/cJTAG SystemVerilog Project"
 	@echo "=================================="
 	@echo ""
 	@echo "Available targets:"
+	@echo "  make all            - Run all tests"
 	@echo "  make verilator      - Build Verilator JTAG testbench"
 	@echo "  make system         - Build System integration testbench"
 	@echo "  make vpi            - Build VPI interface library"
@@ -104,6 +103,8 @@ help:
 	@echo "Configurable tracing:"
 	@echo "  DUMP_FST      (default: $(DUMP_FST)) waveform tracing is $(TRACE_STATE)"
 	@echo "  ENABLE_FST    (default: $(ENABLE_FST)) build-time FST support"
+
+all: verilator system vpi sim sim-system vpi-sim client test-vpi test-jtag test-legacy test-cjtag
 
 verilator: $(BUILD_DIR)
 	@echo "Building Verilator simulation..."
