@@ -404,7 +404,7 @@ test-jtag-legacy: $(BUILD_DIR)/jtag_vpi
 		if ./openocd/test_protocol legacy; then \
 			echo ""; \
 			echo "✓ LEGACY PROTOCOL TEST PASSED"; \
-			echo "All 10 tests completed successfully"; \
+			echo "All 11 tests completed successfully"; \
 			kill $$SERVER_PID 2>/dev/null; \
 			exit 0; \
 		else \

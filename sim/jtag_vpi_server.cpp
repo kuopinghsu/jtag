@@ -245,9 +245,8 @@ void JtagVpiServer::poll() {
             vpi_minimal_mode = false;
         }
         
-        // Continue filling until we have full 1036-byte packet
-        vpi_minimal_mode = false;
-        if (vpi_rx_bytes < VPI_PKT_SIZE) {
+        // Continue filling until we have full 1036-byte packet (only if NOT in minimal mode)
+        if (!vpi_minimal_mode && vpi_rx_bytes < VPI_PKT_SIZE) {
             ssize_t ret = recv(client_sock, ((uint8_t*)&vpi_cmd_rx) + vpi_rx_bytes,
                                VPI_PKT_SIZE - vpi_rx_bytes, MSG_DONTWAIT);
             if (ret < 0) {

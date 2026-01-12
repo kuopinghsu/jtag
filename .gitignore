@@ -1,5 +1,6 @@
 *.fst*
 *.log
 build
+openocd/test_protocol
 syn/results
 syn/reports
