@@ -12,10 +12,9 @@ The project provides two levels of testing:
    - Validates TAP/JTAG interface detection
    - Validates telnet interface responsiveness
 
-2. **Protocol Testing** - Manual via `./openocd/test_protocol`
-   - Tests actual JTAG protocol commands (TAP reset, IR scan, DR scan)
-   - Supports both JTAG and cJTAG modes
-   - Uses direct VPI communication (not via OpenOCD)
+2. **Protocol Testing** - Manual via `./openocd/test_protocol <mode>`
+  - Tests JTAG, cJTAG, or legacy protocols (modes: `jtag`, `cjtag`, `legacy`)
+  - Uses direct VPI communication (not via OpenOCD)
 
 ## Automated Connectivity Testing
 
@@ -54,62 +53,44 @@ make vpi-sim
 
 # Terminal 2: Compile and run protocol tests
 gcc -o openocd/test_protocol openocd/test_protocol.c
-./openocd/test_protocol jtag   # JTAG protocol test
-./openocd/test_protocol cjtag  # cJTAG protocol test
+./openocd/test_protocol jtag     # Modern jtag_vpi protocol
+./openocd/test_protocol cjtag    # Two-wire cJTAG OScan1 (CMD_OSCAN1)
+./openocd/test_protocol legacy   # Legacy 8-byte protocol
 ```
 
-### JTAG Protocol Tests
+### JTAG Protocol Tests (mode: jtag)
+- TAP reset via CMD_RESET
+- Mode query
+- 8-bit SCAN transfer through jtag_vpi
 
-The `test_protocol jtag` command executes:
+### cJTAG Protocol Tests (mode: cjtag)
+- CMD_OSCAN1 availability check
+- OAC + JSCAN_OSCAN_ON bring-up
+- Bit stuffing, SF0 transfer, CRC-8 check, TAP reset
 
-1. **TAP Reset** - Sends 5 TMS=1 pulses to reset TAP controller
-   - Expected: TAP enters Test-Logic-Reset state
-   - Validates: Basic VPI command execution
+### Legacy Protocol Tests (mode: legacy)
+- Legacy CMD_RESET
+- Legacy CMD_SCAN (8-bit payload)
 
-2. **IR Scan** - Loads instruction 0x01 (IDCODE) into instruction register
-   - Expected: 8-bit instruction loaded over JTAG
-   - Validates: State machine transitions (Capture-IR → Shift-IR → Exit1-IR → Update-IR)
-
-3. **Mode Query** - Reads current active mode (JTAG vs cJTAG)
-   - Expected: Returns 0 for JTAG mode
-   - Validates: Mode detection capability
-
-4. **IDCODE Read** - Reads 32-bit IDCODE register via VPI command
-   - Expected: 0x1DEAD3FF (device ID)
-   - Validates: DR capture and shift operations
-
-### cJTAG Protocol Tests
-
-The `test_protocol cjtag` command additionally:
-- Sets cJTAG mode before running protocol tests
-- Validates OScan1 protocol mode detection
-- Ensures cJTAG mode switching works
-
-### Sample Output
+### Sample Output (JTAG)
 
 ```
-=== JTAG/cJTAG Protocol Test Client ===
+=== Unified Protocol Test Client ===
 Mode: jtag
 Target: 127.0.0.1:3333
 
 ✓ Connected to VPI server
 
-=== JTAG Protocol Tests ===
-
-Test 1: JTAG TAP Reset (5 TMS=1 pulses)
-  ✓ PASS: TAP controller reset successful
-Test 2: JTAG IR Scan (load 0x01 IDCODE instruction)
-  ✓ PASS: IR scan executed (loaded instruction 0x01)
-Test 3: Query Active Mode (JTAG vs cJTAG)
-  Active Mode: JTAG
-  ✓ PASS: Mode query successful
-Test 4: JTAG Read IDCODE (via command 0x02)
-  IDCODE: 0x1dead3ff
-  ✓ PASS: IDCODE matches expected value (0x1DEAD3FF)
+Test 1: JTAG TAP Reset (CMD_RESET)
+  ✓ PASS: TAP reset acknowledged
+Test 2: JTAG Mode Query (CMD_SET_PORT)
+  ✓ PASS: Mode=JTAG
+Test 3: JTAG Scan 8 bits (CMD_SCAN)
+  ✓ PASS: SCAN completed (TDO captured)
 
 === Test Summary ===
-Total Tests: 4
-Passed: 4
+Total Tests: 3
+Passed: 3
 Failed: 0
 
 ✓ All tests PASSED
@@ -213,6 +194,6 @@ The VPI server (as currently implemented) accepts only one client connection at 
 
 - [sim/jtag_vpi_server.cpp](../sim/jtag_vpi_server.cpp) - VPI server implementation
 - [vpi/jtag_vpi.c](../vpi/jtag_vpi.c) - VPI command interface
-- [openocd/test_protocol.c](./test_protocol.c) - Protocol test client
+- [openocd/test_protocol.c](./test_protocol.c) - Unified protocol test client (jtag/cjtag/legacy)
 - [openocd/test_openocd.sh](./test_openocd.sh) - Automated test script
 - [tb/jtag_tb.sv](../tb/jtag_tb.sv) - Testbench with cJTAG mode testing

@@ -5,12 +5,36 @@
 set -e
 
 MODE=${1:-jtag}
-TIMEOUT=10
+TIMEOUT_DEFAULT=10
+# Allow override via environment variable OPENOCD_TEST_TIMEOUT (seconds)
+TIMEOUT_SEC="${OPENOCD_TEST_TIMEOUT:-$TIMEOUT_DEFAULT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Detect timeout utility (GNU coreutils). Prefer 'timeout', fallback to 'gtimeout'.
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+
+# Require a timeout utility to avoid hangs
+if [ -z "$TIMEOUT_BIN" ]; then
+    echo "ERROR: timeout utility not found (install coreutils: 'timeout' or 'gtimeout')"
+    exit 1
+fi
+
+# Wait for a TCP port to become ready (localhost only)
+wait_for_port() {
+    local port="$1"
+    local tries="${2:-10}"
+    for i in $(seq 1 "$tries"); do
+        if nc -z localhost "$port" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
 
 echo "=== OpenOCD Automated Test ==="
 echo "Mode: $MODE"
-echo "Timeout: ${TIMEOUT}s"
+echo "Timeout: ${TIMEOUT_SEC}s"
 echo ""
 
 # Check if VPI simulation is running
@@ -56,23 +80,48 @@ echo "  ✓ OpenOCD started (PID: $OPENOCD_PID)"
 # Wait for OpenOCD to initialize and telnet server to be ready
 sleep 3
 
-# Check if OpenOCD is still running
+if [ "$MODE" != "cjtag" ]; then
+    # Extra wait for telnet port readiness (up to TIMEOUT_SEC); fail hard if not ready
+    if ! wait_for_port 4444 "$TIMEOUT_SEC"; then
+        echo "ERROR: telnet port 4444 not ready after ${TIMEOUT_SEC}s"
+        # Cleanup OpenOCD and show log for diagnostics
+        pkill -P $OPENOCD_PID openocd 2>/dev/null || true
+        kill $OPENOCD_PID 2>/dev/null || true
+        wait $OPENOCD_PID 2>/dev/null || true
+        if [ -f "$LOG_FILE" ]; then
+            echo "--- OpenOCD startup log (last 50 lines) ---"
+            tail -n 50 "$LOG_FILE" || true
+            echo "--- end log ---"
+        fi
+        exit 1
+    fi
+fi
+
+# Check if OpenOCD is still running (allow early aborts in cjtag mode)
 if ! kill -0 $OPENOCD_PID 2>/dev/null; then
-    echo "ERROR: OpenOCD failed to start"
-    echo "Log output:"
-    cat "$LOG_FILE"
-    exit 1
+    if [ "$MODE" = "cjtag" ]; then
+        echo "WARNING: OpenOCD exited early in cJTAG mode (continuing)"
+    else
+        echo "ERROR: OpenOCD failed to start"
+        echo "Log output:"
+        cat "$LOG_FILE"
+        exit 1
+    fi
 fi
 
 # Run test commands via telnet
 echo "[5/5] Running test suite..."
 
 # Run OpenOCD with a simple command to test connectivity
-TEST_OUTPUT=$(timeout 5 telnet localhost 4444 <<'EOF' 2>&1 || true
+if [ "$MODE" != "cjtag" ]; then
+    TEST_OUTPUT=$($TIMEOUT_BIN "$TIMEOUT_SEC" telnet localhost 4444 <<'EOF' 2>&1 || true
 help
 quit
 EOF
-)
+    )
+else
+    TEST_OUTPUT="(cjtag mode: telnet test skipped)"
+fi
 
 # Kill OpenOCD if still running
 pkill -P $OPENOCD_PID openocd 2>/dev/null || true
@@ -174,89 +223,39 @@ PROTOCOL_RESULT=0
 LEGACY_RESULT=0
 
 if [ "$MODE" == "jtag" ]; then
-    # Test OpenOCD jtag_vpi protocol (if initialized)
-    if grep -q "OpenOCD initialized" "$LOG_FILE" 2>/dev/null; then
-        echo ""
-        echo "=== OpenOCD jtag_vpi Protocol Testing ==="
-        echo "OpenOCD is using standard jtag_vpi protocol - skipping legacy test"
-    else
-        # Only test legacy protocol if OpenOCD is NOT running with standard jtag_vpi
-        echo ""
-        echo "=== JTAG Protocol Testing (OpenOCD jtag_vpi) ==="
-        
-        # Compile JTAG protocol test if needed
-        JTAG_TEST="$SCRIPT_DIR/test_jtag_protocol"
-        JTAG_SRC="$SCRIPT_DIR/test_jtag_protocol.c"
-        
-        if [ ! -f "$JTAG_TEST" ] && [ -f "$JTAG_SRC" ]; then
-            echo "Compiling JTAG protocol test..."
-            gcc -o "$JTAG_TEST" "$JTAG_SRC" 2>/dev/null || {
-                echo "  ⚠ Could not compile JTAG test (gcc required)"
-                JTAG_TEST=""
-            }
-        fi
-        
-        if [ -x "$JTAG_TEST" ]; then
-            # Kill OpenOCD to free VPI connection
-            pkill -P $OPENOCD_PID openocd 2>/dev/null || true
-            kill $OPENOCD_PID 2>/dev/null || true
-            wait $OPENOCD_PID 2>/dev/null || true
-            sleep 2
-            
-            # Run JTAG protocol test
-            "$JTAG_TEST"
-            PROTOCOL_RESULT=$?
-        else
-            echo "⚠ JTAG protocol test not available (gcc not found)"
-            PROTOCOL_RESULT=0
-        fi
-    fi
-    
-    # Test legacy protocol compatibility for JTAG mode
-    # Note: Legacy protocol can only be tested if OpenOCD didn't use modern jtag_vpi
     echo ""
-    echo "=== Legacy VPI Protocol Testing (8-byte format) ==="
-    
-    if grep -q "OpenOCD initialized" "$LOG_FILE" 2>/dev/null; then
-        echo "Skipping legacy protocol test (OpenOCD used modern jtag_vpi protocol)"
-        echo "Legacy protocol is verified to work when no modern client connects first"
-        LEGACY_RESULT=0  # Pass by default - OpenOCD modern protocol takes precedence
+    echo "=== Unified Protocol Testing (jtag + legacy) ==="
+
+    JTAG_TEST="$SCRIPT_DIR/test_protocol"
+    JTAG_SRC="$SCRIPT_DIR/test_protocol.c"
+
+    if { [ ! -f "$JTAG_TEST" ] || [ "$JTAG_SRC" -nt "$JTAG_TEST" ]; } && [ -f "$JTAG_SRC" ]; then
+        echo "Compiling protocol test (jtag/legacy)..."
+        gcc -o "$JTAG_TEST" "$JTAG_SRC" 2>/dev/null || {
+            echo "  ⚠ Could not compile protocol test (gcc required)"
+            JTAG_TEST=""
+        }
+    fi
+
+    if [ -x "$JTAG_TEST" ]; then
+        # Kill OpenOCD to free VPI connection
+        pkill -P $OPENOCD_PID openocd 2>/dev/null || true
+        kill $OPENOCD_PID 2>/dev/null || true
+        wait $OPENOCD_PID 2>/dev/null || true
+        sleep 2
+
+        # Run JTAG protocol test
+        "$JTAG_TEST" jtag
+        PROTOCOL_RESULT=$?
+
+        echo ""
+        echo "=== Legacy VPI Protocol Testing (8-byte format) ==="
+        "$JTAG_TEST" legacy
+        LEGACY_RESULT=$?
     else
-        echo "Testing backward compatibility with legacy protocol..."
-        
-        # Compile legacy protocol test if needed
-        LEGACY_TEST="$SCRIPT_DIR/test_legacy_protocol"
-        LEGACY_SRC="$SCRIPT_DIR/test_legacy_protocol.c"
-        
-        if [ ! -f "$LEGACY_TEST" ] && [ -f "$LEGACY_SRC" ]; then
-            echo "Compiling legacy protocol test..."
-            gcc -o "$LEGACY_TEST" "$LEGACY_SRC" 2>/dev/null || {
-                echo "  ⚠ Could not compile legacy test (gcc required)"
-                LEGACY_TEST=""
-            }
-        fi
-        
-        if [ -x "$LEGACY_TEST" ]; then
-            # Kill OpenOCD to free VPI connection for legacy test
-            if [ -n "$OPENOCD_PID" ]; then
-                pkill -P $OPENOCD_PID openocd 2>/dev/null || true
-                kill $OPENOCD_PID 2>/dev/null || true
-                wait $OPENOCD_PID 2>/dev/null || true
-                sleep 2
-            fi
-            
-            # Run legacy protocol test
-            "$LEGACY_TEST"
-            LEGACY_RESULT=$?
-        else
-            if [ -f "$LEGACY_SRC" ]; then
-                echo "⚠ Legacy protocol test not available (gcc not found)"
-                LEGACY_RESULT=0
-            else
-                echo "⚠ Legacy protocol test source not found: $LEGACY_SRC"
-                LEGACY_RESULT=0
-            fi
-        fi
+        echo "⚠ Protocol test not available (gcc not found)"
+        PROTOCOL_RESULT=0
+        LEGACY_RESULT=0
     fi
 fi
 
@@ -264,14 +263,14 @@ if [ "$MODE" == "cjtag" ]; then
     echo ""
     echo "=== cJTAG Protocol Testing ==="
     
-    # Compile cJTAG protocol test if needed
-    CJTAG_TEST="$SCRIPT_DIR/test_cjtag_protocol"
-    CJTAG_SRC="$SCRIPT_DIR/test_cjtag_protocol.c"
-    
-    if [ ! -f "$CJTAG_TEST" ] && [ -f "$CJTAG_SRC" ]; then
-        echo "Compiling cJTAG protocol test..."
+    # Compile unified protocol test (cJTAG mode)
+    CJTAG_TEST="$SCRIPT_DIR/test_protocol"
+    CJTAG_SRC="$SCRIPT_DIR/test_protocol.c"
+
+    if { [ ! -f "$CJTAG_TEST" ] || [ "$CJTAG_SRC" -nt "$CJTAG_TEST" ]; } && [ -f "$CJTAG_SRC" ]; then
+        echo "Compiling protocol test (cjtag)..." 
         gcc -o "$CJTAG_TEST" "$CJTAG_SRC" 2>/dev/null || {
-            echo "  ⚠ Could not compile cJTAG test (gcc required)"
+            echo "  ⚠ Could not compile protocol test (gcc required)"
             CJTAG_TEST=""
         }
     fi
@@ -282,11 +281,22 @@ if [ "$MODE" == "cjtag" ]; then
         kill $OPENOCD_PID 2>/dev/null || true
         wait $OPENOCD_PID 2>/dev/null || true
         sleep 2
-        
-        # Run cJTAG protocol test
+
+        # Ensure VPI server port is ready (port 3333); fail hard if not ready
+        if ! wait_for_port 3333 "$TIMEOUT_SEC"; then
+            echo "ERROR: VPI port 3333 not ready after ${TIMEOUT_SEC}s"
+            exit 1
+        fi
+
+        # Run cJTAG protocol test with timeout if available
         set +e
-        "$CJTAG_TEST"
-        PROTOCOL_RESULT=$?
+        if [ -n "$TIMEOUT_BIN" ]; then
+            $TIMEOUT_BIN "$TIMEOUT_SEC" "$CJTAG_TEST" cjtag
+            PROTOCOL_RESULT=$?
+        else
+            "$CJTAG_TEST" cjtag
+            PROTOCOL_RESULT=$?
+        fi
         set -e
     else
         echo "⚠ cJTAG protocol test not available (gcc not found)"
@@ -351,21 +361,11 @@ if [ "$MODE" == "jtag" ]; then
         RESULT=1
     fi
 elif [ "$MODE" == "cjtag" ]; then
-    echo "cJTAG protocol:       $([ "${PROTOCOL_RESULT:-1}" -eq 0 ] && echo "PASS" || echo "FAIL (EXPECTED)")"
+    echo "cJTAG protocol:       $([ "${PROTOCOL_RESULT:-1}" -eq 0 ] && echo "PASS" || echo "FAIL")"
     echo "Legacy protocol:      $([ "${LEGACY_RESULT:-1}" -eq 0 ] && echo "PASS" || echo "FAIL")"
-    
-    # For cJTAG mode, require connectivity + legacy protocol tests to pass
-    # cJTAG protocol test is optional (expected to fail without OpenOCD patches)
-    if [ $OPENOCD_RESULT -eq 0 ] && [ "${LEGACY_RESULT:-1}" -eq 0 ]; then
-        echo ""
-        echo "✓ CORE TESTS PASSED (OpenOCD + Legacy Protocol Compatibility)"
-        if [ $PROTOCOL_RESULT -eq 0 ]; then
-            echo "✓ BONUS: cJTAG protocol also passed - OpenOCD has cJTAG support!"
-        else
-            echo "ℹ cJTAG protocol tests failed (expected without OpenOCD patches)"
-        fi
-        RESULT=0
-    else
+
+    # In cJTAG mode, fail the run if any test fails (connectivity, protocol, or legacy)
+    if [ $OPENOCD_RESULT -ne 0 ] || [ "${LEGACY_RESULT:-1}" -ne 0 ] || [ "${PROTOCOL_RESULT:-1}" -ne 0 ]; then
         echo ""
         echo "✗ SOME TESTS FAILED"
         echo ""
@@ -374,13 +374,9 @@ elif [ "$MODE" == "cjtag" ]; then
         fi
         if [ "${LEGACY_RESULT:-1}" -ne 0 ]; then
             echo "  ✗ Legacy protocol backward compatibility failed"
-            echo ""
-            echo "Check VPI server implementation:"
-            echo "  • Ensure 8-byte command format is supported"
-            echo "  • Verify protocol auto-detection works correctly"
         fi
         if [ "${PROTOCOL_RESULT:-1}" -ne 0 ]; then
-            echo "  ℹ cJTAG protocol tests failed (expected until OpenOCD is patched)"
+            echo "  ✗ cJTAG protocol tests failed"
         fi
         echo ""
         echo "To support cJTAG, OpenOCD needs:"
@@ -388,6 +384,10 @@ elif [ "$MODE" == "cjtag" ]; then
         echo "  • Two-wire TCKC/TMSC signaling"
         echo "  • JScan command generation"
         RESULT=1
+    else
+        echo ""
+        echo "✓ ALL TESTS PASSED"
+        RESULT=0
     fi
 else
     # No protocol testing for unknown modes

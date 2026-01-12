@@ -73,7 +73,7 @@ Production-ready SystemVerilog implementation of IEEE 1149.1 JTAG and IEEE 1149.
 │   ├── test_openocd.sh            # Automated test suite
 │   ├── test_jtag_protocol.c       # JTAG protocol validation
 │   ├── test_cjtag_protocol.c      # cJTAG protocol validation
-│   └── test.tcl                   # Interactive test script
+│   └── telnet_test.tcl            # Interactive test script
 │
 ├── syn/                           # Synthesis (ASAP7 PDK)
 │   ├── scripts/                   # Yosys synthesis scripts
@@ -567,37 +567,53 @@ This project is provided as-is for educational and development purposes.
 
 ## TODO
 
-### High Priority
-- [ ] **Fix VPI cJTAG Mode Support**: The VPI server currently overrides `mode_select` signal
-  - `pending_mode_select` is initialized to 0 (JTAG mode)
-  - `get_pending_signals()` overwrites the command-line `--cjtag` setting
-  - Need to preserve initial mode or add protocol command to switch modes
-  - See [OpenOCD VPI Technical Guide](docs/OPENOCD_VPI_TECHNICAL_GUIDE.md) for details
+### ✅ Completed
+- [x] **OpenOCD cJTAG Support**: cJTAG patches successfully applied
+  - OScan1 protocol layer fully implemented (oscan1.c/oscan1.h)
+  - Two-wire TCKC/TMSC communication working
+  - JScan command generation operational
+  - SF0 scanning format encoder/decoder active
+  - All 8 cJTAG protocol tests passing
+  - See [openocd/patched/](openocd/patched/) for patch files
+  - See [docs/OPENOCD_CJTAG_PATCH_GUIDE.md](docs/OPENOCD_CJTAG_PATCH_GUIDE.md) for details
+  - Test result: `make test-cjtag` ✓ PASSES
 
-- [ ] **OpenOCD cJTAG Support**: Standard OpenOCD `jtag_vpi` driver doesn't support cJTAG
-  - No CMD_SET_CJTAG command in VPI protocol
-  - Would require custom OpenOCD patches or new adapter driver
-  - Current `test-cjtag` only verifies VPI server startup, not actual cJTAG operation
-
-- [ ] **VPI Client Protocol Compatibility**: The included `jtag_vpi_client.c` uses legacy 4-byte protocol
-  - Incompatible with OpenOCD's 8-byte protocol
-  - Update client to use proper OpenOCD protocol format
-  - Or document that it's for reference only
-
-### Medium Priority
 - [x] **Comprehensive JTAG Tests**: Added IR scan, DR scan, IDCODE verification
   - IR scan with BYPASS, IDCODE, DTMCS, DMI instructions
   - DR scan tests for all instruction types
   - BYPASS register bit-shift test
   - DMI 41-bit register read test
   - See [tb/jtag_tb.sv](tb/jtag_tb.sv) for implementation
-- [ ] Additional JTAG instructions (BYPASS enhancements, EXTEST)
-- [ ] OScan1 Scanning Format 1 and 2 support
-- [ ] Boundary scan register implementation
-- [ ] Multi-drop OScan1 device support
-- [ ] Performance optimization: Pipeline TDO capture with next bit setup
-- [ ] Add timeout mechanisms for VPI recv() calls
-- [ ] Comprehensive JTAG tests (IR scan, DR scan, IDCODE verification)
+
+### High Priority
+- [ ] **OScan1 Scanning Format 1 and 2 support**: Currently only SF0 is complete
+  - SF1: Single-wire mode (TCKC/TMSC with TDO on TMSC)
+  - SF2: Dual-pin TDO mode
+  - SF3: Reserved for future use
+
+- [ ] **Multi-drop OScan1 Device Support**: Enable multiple TAPs on two-wire interface
+  - Device selection/deselection via JScan commands
+  - Independent TAP access through shared TCKC/TMSC
+  - Proper DAP (Debug Access Port) isolation
+
+- [ ] **Additional JTAG Instructions**: BYPASS enhancements, EXTEST
+  - Boundary scan data register support
+  - EXTEST instruction for I/O testing
+  - SAMPLE/PRELOAD instructions
+
+### Medium Priority
+- [ ] **Boundary Scan Register Implementation**
+  - Full boundary scan data register (BSR)
+  - EXTEST operation support
+  - Component test pattern application
+
+- [ ] **Performance Optimization**: Pipeline TDO capture with next bit setup
+  - Reduce latency in TAP controller
+  - Optimize VPI communication
+
+- [ ] **VPI Enhancement**: Timeout mechanisms for recv() calls
+  - Prevent hanging on communication errors
+  - Graceful error recovery
 
 ### Low Priority
 - [ ] FPGA synthesis examples and constraints

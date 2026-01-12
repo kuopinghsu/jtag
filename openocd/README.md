@@ -89,7 +89,7 @@ Standard 5-wire JTAG mode configuration:
 - Requires mode_select=1 in simulation
 - OScan1 protocol handling via VPI bridge
 
-### test.tcl
+### telnet_test.tcl
 Automated test script with:
 - `test_jtag` - Complete JTAG test suite
 - `test_cjtag` - cJTAG specific tests
@@ -143,7 +143,7 @@ openocd -f openocd/jtag.cfg
 telnet localhost 4444
 
 # Run test suite
-> source openocd/test.tcl
+> source openocd/telnet_test.tcl
 > test_jtag
 ```
 
@@ -165,7 +165,7 @@ openocd -f openocd/cjtag.cfg
 telnet localhost 4444
 
 # Run cJTAG test suite
-> source openocd/test.tcl
+> source openocd/telnet_test.tcl
 > test_cjtag
 ```
 

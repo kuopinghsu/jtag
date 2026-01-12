@@ -27,12 +27,30 @@ YOSYS := $(OSS_CAD_SUITE)/bin/yosys
 STA := $(OSS_CAD_SUITE)/bin/sta
 
 # Flags
-VERILATOR_FLAGS := --cc --exe --build -j 4 --trace-fst --timescale 1ns/1ps \
-                   --top-module jtag_tb --timing -Wno-fatal
-VERILATOR_SYS_FLAGS := --cc --exe --build -j 4 --trace-fst --timescale 1ns/1ps \
-                       --top-module system_tb --timing -Wno-fatal
+# Build-time FST waveform support (0=disabled, 1=enabled)
+# Usage: make ENABLE_FST=1 DUMP_FST=1 sim
+ENABLE_FST ?= 0
+VERILATOR_TRACE_FLAG := $(if $(filter 1 yes true TRUE on ON,$(ENABLE_FST)),--trace-fst,)
+VERILATOR_CPPFLAGS := -CFLAGS "-DENABLE_FST=$(ENABLE_FST)"
+VERILATOR_FLAGS := --cc --exe --build -j 4 $(VERILATOR_TRACE_FLAG) --timescale 1ns/1ps \
+				   --top-module jtag_tb --timing -Wno-fatal $(VERILATOR_CPPFLAGS)
+VERILATOR_SYS_FLAGS := --cc --exe --build -j 4 $(VERILATOR_TRACE_FLAG) --timescale 1ns/1ps \
+					   --top-module system_tb --timing -Wno-fatal $(VERILATOR_CPPFLAGS)
 VPI_CFLAGS := -fPIC
 GCC_CFLAGS := -Wall -O2
+
+# Timeouts (seconds) - configurable via environment
+# Example: make SIM_TIMEOUT=1 vpi-sim
+#          make TEST_TIMEOUT=20 test-jtag
+SIM_TIMEOUT ?= 1
+TEST_TIMEOUT ?= 30
+
+# Waveform tracing flag for runtime (--trace) [default: disabled]
+# Usage: make DUMP_FST=1 vpi-sim     (enable tracing)
+#        make DUMP_FST=0 test-jtag   (disable tracing)
+DUMP_FST ?= 0
+TRACE_OPT := $(if $(filter 1 yes true TRUE on ON,$(DUMP_FST)),--trace,)
+TRACE_STATE := $(if $(TRACE_OPT),enabled,disabled)
 
 all: help
 
@@ -65,6 +83,13 @@ help:
 	@echo "  make test-jtag                  (automated JTAG test)"
 	@echo "  make test-jtag-legacy           (legacy protocol test)"
 	@echo "  make synth                      (ASAP7 synthesis)"
+	@echo ""
+	@echo "Configurable timeouts:"
+	@echo "  SIM_TIMEOUT   (default: $(SIM_TIMEOUT)s) for vpi-sim targets"
+	@echo "  TEST_TIMEOUT  (default: $(TEST_TIMEOUT)s) for test-* targets"
+	@echo "Configurable tracing:"
+	@echo "  DUMP_FST      (default: $(DUMP_FST)) waveform tracing is $(TRACE_STATE)"
+	@echo "  ENABLE_FST    (default: $(ENABLE_FST)) build-time FST support"
 
 verilator: $(BUILD_DIR)
 	@echo "Building Verilator simulation..."
@@ -96,11 +121,11 @@ client: vpi
 
 sim: verilator
 	@echo "Running Verilator simulation..."
-	$(VERILATOR_DIR)/Vjtag_tb --trace
+	$(VERILATOR_DIR)/Vjtag_tb $(TRACE_OPT)
 
 sim-system: system
 	@echo "Running System integration simulation..."
-	$(VERILATOR_DIR)/Vsystem_tb --trace
+	$(VERILATOR_DIR)/Vsystem_tb $(TRACE_OPT)
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
@@ -108,8 +133,7 @@ $(BUILD_DIR):
 clean: synth-clean
 	@echo "Cleaning build artifacts..."
 	@rm -rf $(BUILD_DIR)
-	@rm -f *.fst *.vcd *.fst.hier *.log
-	@rm -f openocd/test_jtag_protocol openocd/test_cjtag_protocol openocd/test_protocol openocd/test_legacy_protocol
+	@rm -f *.fst *.vcd *.fst.hier *.log openocd/test_protocol
 	@echo "✓ Clean complete"
 
 synth-clean:
@@ -191,13 +215,14 @@ synth-reports: $(SYN_DIR)
 $(BUILD_DIR)/jtag_vpi: $(BUILD_DIR)
 	@echo "Building VPI interactive simulation..."
 	@mkdir -p $(VERILATOR_DIR)
-	$(VERILATOR) --cc --exe --build -j 4 --trace-fst --timescale 1ns/1ps \
+	$(VERILATOR) --cc --exe --build -j 4 $(VERILATOR_TRACE_FLAG) --timescale 1ns/1ps \
 		--top-module jtag_vpi_top --timing -Wno-fatal \
 		-I$(JTAG_DIR) -I$(DBG_DIR) -I$(SRC_DIR) -I$(TB_DIR) -I$(SIM_DIR) \
 		-Mdir $(VERILATOR_DIR) \
 		-o ../jtag_vpi \
 		$(SIM_DIR)/jtag_vpi_top.sv $(JTAG_DIR)/*.sv \
-		$(SIM_DIR)/sim_vpi_main.cpp $(SIM_DIR)/jtag_vpi_server.cpp
+		$(SIM_DIR)/sim_vpi_main.cpp $(SIM_DIR)/jtag_vpi_server.cpp \
+		$(VERILATOR_CPPFLAGS)
 	@echo "✓ VPI simulation built: build/jtag_vpi"
 
 # VPI simulation variants (protocol selection)
@@ -206,27 +231,33 @@ vpi-sim-openocd: $(BUILD_DIR)/jtag_vpi
 	@echo "=== Starting JTAG VPI Simulation (OpenOCD Protocol) ==="
 	@echo "Protocol: OpenOCD jtag_vpi (1036-byte packets)"
 	@echo "Port: 3333"
+	@echo "Timeout: $(SIM_TIMEOUT)s"
+	@echo "Trace: $(TRACE_STATE)"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@$(BUILD_DIR)/jtag_vpi --trace --timeout 300 --proto=openocd
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(SIM_TIMEOUT) --proto=openocd
 
 vpi-sim-legacy: $(BUILD_DIR)/jtag_vpi
 	@echo ""
 	@echo "=== Starting JTAG VPI Simulation (Legacy Protocol) ==="
 	@echo "Protocol: Legacy 8-byte header"
 	@echo "Port: 3333"
+	@echo "Timeout: $(SIM_TIMEOUT)s"
+	@echo "Trace: $(TRACE_STATE)"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@$(BUILD_DIR)/jtag_vpi --trace --timeout 300 --proto=legacy
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(SIM_TIMEOUT) --proto=legacy
 
 vpi-sim-auto: $(BUILD_DIR)/jtag_vpi
 	@echo ""
 	@echo "=== Starting JTAG VPI Simulation (Auto-Detect Protocol) ==="
 	@echo "Protocol: Auto-detected at connection time"
 	@echo "Port: 3333"
+	@echo "Timeout: $(SIM_TIMEOUT)s"
+	@echo "Trace: $(TRACE_STATE)"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@$(BUILD_DIR)/jtag_vpi --trace --timeout 300 --proto=auto
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(SIM_TIMEOUT) --proto=auto
 
 # Interactive VPI simulation target (runs foreground, auto-detect protocol)
 vpi-sim: vpi-sim-auto
@@ -239,7 +270,7 @@ test-vpi: $(BUILD_DIR)/jtag_vpi client
 	@pkill -9 jtag_vpi 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in background..."
-	@$(BUILD_DIR)/jtag_vpi --trace --timeout 60 > vpi_sim.log 2>&1 & \
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(TEST_TIMEOUT) > vpi_sim.log 2>&1 & \
 		SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \
 		sleep 2; \
@@ -269,7 +300,7 @@ test-jtag: $(BUILD_DIR)/jtag_vpi
 	@pkill -9 jtag_vpi openocd 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in background..."
-	@$(BUILD_DIR)/jtag_vpi --trace --timeout 60 > vpi_openocd.log 2>&1 & \
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(TEST_TIMEOUT) > vpi_openocd.log 2>&1 & \
 		SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \
 		sleep 3; \
@@ -309,7 +340,7 @@ test-cjtag: $(BUILD_DIR)/jtag_vpi
 	@pkill -9 jtag_vpi openocd 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in cJTAG mode..."
-	@$(BUILD_DIR)/jtag_vpi --trace --timeout 60 --cjtag > vpi_cjtag.log 2>&1 & \
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(TEST_TIMEOUT) --cjtag > vpi_cjtag.log 2>&1 & \
 		SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \
 		sleep 3; \
@@ -347,7 +378,7 @@ test-jtag-legacy: $(BUILD_DIR)/jtag_vpi
 	@pkill -9 jtag_vpi 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in legacy protocol mode..."
-	@$(BUILD_DIR)/jtag_vpi --trace --timeout 60 --proto=legacy > vpi_legacy.log 2>&1 & \
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) --timeout $(TEST_TIMEOUT) --proto=legacy > vpi_legacy.log 2>&1 & \
 		SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \
 		sleep 3; \
@@ -358,8 +389,8 @@ test-jtag-legacy: $(BUILD_DIR)/jtag_vpi
 		fi; \
 		echo "✓ VPI server started in legacy mode"; \
 		echo ""; \
-		echo "Compiling legacy protocol tests..."; \
-		gcc -o openocd/test_legacy_protocol openocd/test_legacy_protocol.c || { \
+		echo "Compiling unified protocol test (legacy)..."; \
+		gcc -o openocd/test_protocol openocd/test_protocol.c || { \
 			echo "✗ Test compilation failed"; \
 			kill $$SERVER_PID 2>/dev/null; \
 			exit 1; \
@@ -368,7 +399,7 @@ test-jtag-legacy: $(BUILD_DIR)/jtag_vpi
 		echo ""; \
 		echo "Server mode: legacy-only"; \
 		echo "Running legacy protocol test suite..."; \
-		if ./openocd/test_legacy_protocol; then \
+		if ./openocd/test_protocol legacy; then \
 			echo ""; \
 			echo "✓ LEGACY PROTOCOL TEST PASSED"; \
 			echo "All 10 tests completed successfully"; \

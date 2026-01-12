@@ -18,16 +18,16 @@ public:
 
     JtagVpiServer(int port = 3333);
     ~JtagVpiServer();
-    
+
     bool init();
     void poll();
     void update_signals(uint8_t tdo, uint32_t idcode, uint8_t mode);
     void update_signals(uint8_t tdo, uint8_t tdo_en, uint32_t idcode, uint8_t mode);
-    bool get_pending_signals(uint8_t* tms, uint8_t* tdi, uint8_t* mode_sel, bool* tck_pulse);
+    bool get_pending_signals(uint8_t* tms, uint8_t* tdi, uint8_t* mode_sel, bool* tck_pulse, bool* tckc_toggle = nullptr);
     bool is_client_connected() const { return client_sock >= 0; }
     void set_msb_first(bool v) { msb_first = v; }
     void set_protocol_mode(ProtocolMode m) { protocol_mode = m; }
-    
+
 private:
     // OpenOCD jtag_vpi protocol (packed) structure size: 1036 bytes
     struct __attribute__((packed)) OcdVpiCmd {
@@ -40,26 +40,44 @@ private:
 
     static constexpr uint32_t VPI_PKT_SIZE = sizeof(OcdVpiCmd);
 
+    // Minimal OpenOCD VPI protocol structures (used by test_protocol)
+    struct __attribute__((packed)) MinimalVpiCmd {
+        uint8_t cmd;
+        uint8_t pad[3];
+        uint32_t length;  // little-endian
+    };
+
+    struct __attribute__((packed)) MinimalVpiResp {
+        uint8_t response;
+        uint8_t tdo_val;
+        uint8_t mode;
+        uint8_t status;
+    };
+
     ProtocolMode protocol_mode = PROTO_UNKNOWN; // start unknown and auto-detect
 
     int port;
     int server_sock;
     int client_sock;
-    
+
     // Current signal values
     uint8_t current_tdo;
     uint8_t current_tdo_en;
     uint32_t current_idcode;
     uint8_t current_mode;
     bool msb_first;
-    
+
     // Pending commands from client
     uint8_t pending_tms;
     uint8_t pending_tdi;
     uint8_t pending_mode_select;
     bool pending_tck_pulse;
     int  reset_pulses_remaining;   // number of TCK pulses to issue for reset
-    
+
+    // cJTAG/OScan1 state
+    uint8_t tckc_state;            // Current TCKC level (0 or 1)
+    bool pending_tckc_toggle;      // Toggle TCKC for next cycle
+
     // TCK pulse queue for operations that need multiple cycles (like RESET)
     struct TckOp {
         uint8_t tms;
@@ -80,16 +98,17 @@ private:
     OcdVpiCmd vpi_cmd_tx;
     uint32_t vpi_tx_bytes = 0;
     bool vpi_tx_pending = false;
-    
+    bool vpi_minimal_mode = false;  // true if using 8-byte cmd / 4-byte resp
+
     // TMS sequence state (OpenOCD)
     bool tms_seq_active = false;
     uint32_t tms_seq_num_bits = 0;
     uint32_t tms_seq_bit_index = 0;
     uint8_t tms_seq_buf[512];
-    
+
     void enqueue_tck(uint8_t tms, uint8_t tdi);
     bool dequeue_tck(uint8_t* tms, uint8_t* tdi);
-    
+
     // Scan operation state
     enum ScanState {
         SCAN_IDLE,
@@ -107,7 +126,7 @@ private:
     uint8_t scan_tdo_buf[512];
     uint32_t scan_bytes_received;
     uint32_t scan_bytes_sent;
-    
+
     // Legacy protocol handlers
     void process_command(struct vpi_cmd* cmd, struct vpi_resp* resp);
     void process_scan(uint32_t num_bits);
@@ -115,6 +134,7 @@ private:
 
     // OpenOCD protocol handlers
     void process_vpi_packet();
+    void send_minimal_response(uint8_t response, uint8_t tdo_val, uint8_t mode, uint8_t status);
     void continue_vpi_work();
     void close_connection();
 };
