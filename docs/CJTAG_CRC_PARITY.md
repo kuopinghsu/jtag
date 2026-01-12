@@ -72,26 +72,26 @@ module cjtag_crc_parity #(
 )(
     input  logic        clk,
     input  logic        rst_n,
-    
+
     // Data input interface
     input  logic [7:0]  data_byte,          // Input data byte
     input  logic        data_valid,         // Data byte valid strobe
     input  logic        data_last,          // Last byte in packet
-    
+
     // CRC/Parity outputs
     output logic [7:0]  crc_value,          // Current CRC value
     output logic        parity_bit,         // Current parity bit
-    
+
     // Error detection
     input  logic [7:0]  expected_crc,       // Expected CRC (from packet)
     input  logic        expected_parity,    // Expected parity (from packet)
     output logic        crc_error,          // CRC mismatch detected
     output logic        parity_error,       // Parity error detected
-    
+
     // Error statistics
     output logic [15:0] crc_error_count,    // Total CRC errors
     output logic [15:0] parity_error_count, // Total parity errors
-    
+
     // Control
     input  logic        clear_errors        // Clear error counters
 );
@@ -103,7 +103,7 @@ module cjtag_crc_parity #(
 
 **Standard CRC-8**: x^8 + x^2 + x + 1
 
-**Binary**: `1 0000 0111` = `0x107` (9-bit)  
+**Binary**: `1 0000 0111` = `0x107` (9-bit)
 **8-bit form**: `0000 0111` = `0x07`
 
 ### Calculation
@@ -305,7 +305,7 @@ always_ff @(posedge clk) begin
     if (shift_active) begin
         data_byte <= {data_byte[6:0], tmsc_sampled};
         bit_count <= bit_count + 1;
-        
+
         if (bit_count == 7) begin
             data_valid <= 1'b1;  // Byte complete
             bit_count <= 0;
@@ -313,7 +313,7 @@ always_ff @(posedge clk) begin
             data_valid <= 1'b0;
         end
     end
-    
+
     if (packet_end) begin
         data_last <= 1'b1;
     end else begin
@@ -373,11 +373,11 @@ always_ff @(posedge clk or negedge rst_n) begin
             IDLE: begin
                 if (packet_start) state <= RECEIVING;
             end
-            
+
             RECEIVING: begin
                 if (data_last) state <= CHECKING;
             end
-            
+
             CHECKING: begin
                 if (crc_error || parity_error) begin
                     state <= ERROR;
@@ -385,7 +385,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                     state <= IDLE;
                 end
             end
-            
+
             ERROR: begin
                 // Handle error (retry, report, etc.)
                 if (error_cleared) state <= IDLE;
@@ -487,48 +487,48 @@ module tb_cjtag_crc_parity;
     logic data_valid, data_last;
     logic [7:0] crc_value;
     logic crc_error;
-    
+
     // DUT
     cjtag_crc_parity #(
         .ENABLE_CRC(1'b1),
         .ENABLE_PARITY(1'b0)
     ) dut (.*);
-    
+
     // Clock generation
     initial begin
         clk = 0;
         forever #5 clk = ~clk;
     end
-    
+
     // Test sequence
     initial begin
         rst_n = 0;
         #20 rst_n = 1;
-        
+
         // Send test packet
         @(posedge clk);
         data_byte = 8'hA5;
         data_valid = 1;
         data_last = 0;
-        
+
         @(posedge clk);
         data_byte = 8'h3C;
         data_valid = 1;
         data_last = 0;
-        
+
         @(posedge clk);
         data_byte = 8'h69;
         data_valid = 1;
         data_last = 1;
-        
+
         @(posedge clk);
         data_valid = 0;
         data_last = 0;
-        
+
         // Check CRC
         #10;
         $display("CRC Value: 0x%02X", crc_value);
-        
+
         $finish;
     end
 endmodule

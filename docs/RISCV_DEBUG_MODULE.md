@@ -355,7 +355,7 @@ module system_top(
     logic [31:0] dmi_wdata, dmi_rdata;
     dmi_op_e     dmi_op;
     dmi_resp_e   dmi_resp;
-    
+
     // JTAG with DTM
     jtag_top jtag (
         .clk(clk), .rst_n(rst_n),
@@ -366,7 +366,7 @@ module system_top(
         .dmi_resp(dmi_resp),
         ...
     );
-    
+
     // Debug Module
     riscv_debug_module #(
         .NUM_HARTS(4),

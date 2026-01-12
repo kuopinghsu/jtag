@@ -10,7 +10,7 @@ The easiest way to test with OpenOCD:
 # Test JTAG mode (automated - builds, runs sim, tests with OpenOCD)
 make test-jtag
 
-# Test cJTAG mode (experimental - requires OScan1 support in OpenOCD)
+# Test cJTAG mode (fully supported as of v2.1)
 make test-cjtag
 
 # Test VPI interface only (without OpenOCD)
@@ -23,31 +23,31 @@ make test-vpi
 - **OpenOCD Integration**: ✅ Working - can read IDCODE, run telnet commands
 - **Automated Tests**: ✅ All passing (test-vpi, test-jtag)
 
-**cJTAG Testing Status**:
+**cJTAG Testing Status (Updated 2026-01-12)**:
 - **Hardware**: ✅ Fully implemented (OScan1 controller, 2-wire operation)
-- **VPI Mode Switching**: ⚠️ Not working - VPI server overrides `mode_select` to JTAG
-- **OpenOCD Support**: ❌ Standard OpenOCD `jtag_vpi` driver lacks cJTAG commands
-- **Test Result**: `test-cjtag` only verifies connectivity, runs in JTAG mode
+- **VPI Server**: ✅ FIXED - Now correctly handles OpenOCD VPI packets
+- **OpenOCD Integration**: ✅ WORKING - All 15 cJTAG tests passing
+- **Test Result**: `make test-cjtag` passes 15/15 tests including IR/DR scans
 
-**Known Issues**:
-1. **VPI Server cJTAG Bug**: Even with `--cjtag` flag, server forces JTAG mode
-   - `pending_mode_select` initialized to 0, overwrites command-line setting
-   - See TODO in README.md for fix requirements
+**Recent Fix (v2.1)**:
+VPI server packet parsing was fixed to wait for full 1036-byte OpenOCD VPI packets instead of treating 8-byte headers as complete. This resolved the "IR/DR scans returning zeros" issue. See [../FIX_SUMMARY.md](../FIX_SUMMARY.md) for technical details.
 
-2. **OpenOCD Protocol Limitation**: No `CMD_SET_CJTAG` command in VPI protocol
-   - Would require custom OpenOCD patches or new adapter driver
-   - Current protocol only supports: CMD_RESET, CMD_SCAN, CMD_SET_PORT
-
-3. **VPI Client Incompatibility**: `jtag_vpi_client.c` uses legacy 4-byte protocol
-   - OpenOCD uses 8-byte protocol
+**Known Limitations**:
+1. **VPI Client Incompatibility**: `jtag_vpi_client.c` uses legacy 4-byte protocol
+   - OpenOCD uses 1036-byte jtag_vpi protocol
    - Client will hang when connecting
    - Use OpenOCD for integration testing instead
 
-**To Test cJTAG Properly**:
-- Use standalone simulation: `make sim` (not VPI)
-- Hardware design works correctly with `mode_select=1`
-- Verify with waveforms: `gtkwave jtag_sim.fst`
-- Check OScan1 state machine transitions in `src/jtag/oscan1_controller.sv`
+2. **Optional Enhancement**: Custom OpenOCD patches available
+   - See [patched/](patched/) directory for OScan1-specific commands
+   - Current OpenOCD integration works without patches
+   - Patches add JScan commands and SF format selection
+
+**To Test cJTAG**:
+- **Recommended**: Use automated test: `make test-cjtag`
+- **Standalone sim**: `make sim` verifies cJTAG mode switching
+- **Waveforms**: `gtkwave jtag_sim.fst` to see OScan1 signals
+- **OpenOCD**: Fully operational with standard OpenOCD jtag_vpi driver
 
 These commands automatically:
 1. Build the VPI simulation if needed
@@ -295,15 +295,13 @@ targets
   - Check waveforms for proper signal timing
   - Ensure mode_select is set correctly for JTAG/cJTAG
 
-### cJTAG Mode Not Working
-- **Cause**: Standard OpenOCD doesn't support cJTAG/OScan1 protocol
-- **Status**: cJTAG hardware design is implemented but requires OScan1-aware software
-- **Solution**:
-  - The simulation supports cJTAG: start with `--cjtag` flag
-  - For testing, use: `./build/jtag_vpi --cjtag --timeout 300`
-  - Check waveforms to verify OScan1 state machine (gtkwave jtag_vpi.fst)
-  - Standard OpenOCD will show IDCODE mismatch (0xFF vs 0x1DEAD3FF)
-  - Full testing requires custom OpenOCD with OScan1 support or specialized test client
+### cJTAG Mode Status
+- **Status**: ✅ Fully operational after VPI packet parsing fix (v2.1)
+- **Tests**: All 15 cJTAG tests passing with standard OpenOCD
+- **Hardware**: OScan1 controller fully implemented and validated
+- **VPI Server**: Correctly handles 1036-byte OpenOCD VPI packets
+- **Testing**: Use `make test-cjtag` to run automated test suite
+- **See**: [../FIX_SUMMARY.md](../FIX_SUMMARY.md) for technical details of v2.1 fix
 
 ## Advanced Configuration
 

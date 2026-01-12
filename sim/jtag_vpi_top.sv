@@ -4,12 +4,12 @@
  * Uses 4-pin multiplexed interface
  */
 
-module jtag_vpi_top 
+module jtag_vpi_top
     import jtag_dmi_pkg::*;
 (
     input  logic clk,
     input  logic rst_n,
-    
+
     // 4 Shared Physical I/O Pins
     input  logic jtag_pin0_i,      // Pin 0: TCK/TCKC (input)
     input  logic jtag_pin1_i,      // Pin 1: TMS/TMSC (bidir input)
@@ -20,7 +20,7 @@ module jtag_vpi_top
     output logic jtag_pin3_oen,    // Pin 3: Output enable
     input  logic jtag_trst_n_i,    // Optional TRST_N
     input  logic mode_select,      // 0=JTAG, 1=cJTAG
-    
+
     // Expose outputs
     output logic [31:0] idcode,
     output logic active_mode
@@ -34,7 +34,7 @@ module jtag_vpi_top
     jtag_dmi_pkg::dmi_resp_e   dmi_resp;
     logic                      dmi_req_valid;
     logic                      dmi_req_ready;
-    
+
     // DMI dummy response - always ready with success
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

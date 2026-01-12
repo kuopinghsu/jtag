@@ -42,7 +42,7 @@ jtag_top (Top-level integration)
 module jtag_top (
     input  logic        clk,
     input  logic        rst_n,
-    
+
     // 4 Shared Physical Pins
     input  logic        jtag_pin0_i,      // TCK/TCKC
     input  logic        jtag_pin1_i,      // TMS/TMSC (in)
@@ -53,7 +53,7 @@ module jtag_top (
     output logic        jtag_pin3_oen,    // TDO (oe)
     input  logic        jtag_trst_n_i,
     input  logic        mode_select,      // 0=JTAG, 1=cJTAG
-    
+
     // DMI Interface (to Debug Module)
     output logic [6:0]  dmi_addr,
     output logic [31:0] dmi_wdata,
@@ -62,7 +62,7 @@ module jtag_top (
     input  dmi_resp_e   dmi_resp,
     output logic        dmi_req_valid,
     input  logic        dmi_req_ready,
-    
+
     // Outputs
     output logic [31:0] idcode,
     output logic        active_mode
@@ -97,21 +97,21 @@ module jtag_interface (
     input  logic       clk,
     input  logic       rst_n,
     input  logic       mode_select,      // 0=JTAG, 1=cJTAG
-    
+
     // JTAG Mode Pins (4-wire)
     input  logic       tck,
     input  logic       tms,
     input  logic       tdi,
     output logic       tdo,
     input  logic       trst_n,
-    
+
     // cJTAG Mode Pins (2-wire)
     input  logic       tco,              // Clock/data combined
     input  logic       tmsc_in,          // Bidirectional data
     output logic       tmsc_out,
     output logic       tmsc_oen,
     output logic       tdi_oscan,
-    
+
     // Internal JTAG Signals
     output logic       jtag_clk,
     output logic       jtag_tms,
@@ -173,23 +173,23 @@ module oscan1_controller #(
 )(
     input  logic       clk,
     input  logic       rst_n,
-    
+
     // Physical cJTAG pins
     input  logic       tco,              // Combined clock/data
     input  logic       tmsc_in,          // Bidirectional data in
     output logic       tmsc_out,         // Bidirectional data out
     output logic       tmsc_oen,         // Output enable
-    
+
     // JTAG signals (to TAP)
     output logic       tck,
     output logic       tms,
     output logic       tdi,
     input  logic       tdo,
-    
+
     // Status
     output logic       oscan1_active,
     output logic       oscan1_error,
-    
+
     // Error statistics
     output logic [15:0] crc_error_count,
     output logic [15:0] parity_error_count
@@ -249,7 +249,7 @@ module jtag_tap_controller (
     input  logic       tck,
     input  logic       tms,
     input  logic       trst_n,
-    
+
     // TAP state outputs
     output logic       shift_dr,
     output logic       update_dr,
@@ -298,7 +298,7 @@ module jtag_instruction_register (
     input  logic       update_ir,
     input  logic       capture_ir,
     input  logic       trst_n,
-    
+
     output logic [7:0] ir_out
 );
 ```
@@ -351,7 +351,7 @@ DMI (41-bit):
 module jtag_dtm (
     input  logic                    clk,
     input  logic                    rst_n,
-    
+
     // JTAG TAP interface
     input  logic                    tdi,
     output logic                    tdo,
@@ -359,7 +359,7 @@ module jtag_dtm (
     input  logic                    update_dr,
     input  logic                    capture_dr,
     input  logic [7:0]              ir_out,
-    
+
     // DMI interface to Debug Module
     output logic [6:0]              dmi_addr,
     output logic [31:0]             dmi_wdata,
@@ -368,7 +368,7 @@ module jtag_dtm (
     input  dmi_resp_e               dmi_resp,
     output logic                    dmi_req_valid,
     input  logic                    dmi_req_ready,
-    
+
     output logic [31:0]             idcode
 );
 ```
@@ -393,14 +393,14 @@ package jtag_dmi_pkg;
     localparam int DMI_ADDR_WIDTH = 7;
     localparam int DMI_DATA_WIDTH = 32;
     localparam int DMI_OP_WIDTH   = 2;
-    
+
     // DMI operation types
     typedef enum logic [1:0] {
         DMI_OP_NOP   = 2'b00,
         DMI_OP_READ  = 2'b01,
         DMI_OP_WRITE = 2'b10
     } dmi_op_e;
-    
+
     // DMI response types
     typedef enum logic [1:0] {
         DMI_RESP_SUCCESS = 2'b00,
@@ -491,13 +491,13 @@ src/jtag/
 module system (
     input  logic clk,
     input  logic rst_n,
-    
+
     // JTAG pins
     input  logic jtag_tck,
     input  logic jtag_tms,
     input  logic jtag_tdi,
     output logic jtag_tdo,
-    
+
     input  logic mode_select
 );
     // DMI signals
@@ -506,7 +506,7 @@ module system (
     dmi_op_e     dmi_op;
     dmi_resp_e   dmi_resp;
     logic        dmi_req_valid, dmi_req_ready;
-    
+
     // JTAG top
     jtag_top jtag (
         .clk(clk),
@@ -526,7 +526,7 @@ module system (
         .dmi_req_ready(dmi_req_ready),
         ...
     );
-    
+
     // Debug Module
     riscv_debug_module dbg (
         .clk(clk),
@@ -626,13 +626,13 @@ module jtag_scan_chain #(
 )(
     input  logic        clk,
     input  logic        rst_n,
-    
+
     // Upstream JTAG
     input  logic        tap_tck,
     input  logic        tap_tms,
     input  logic        tap_tdi,
     output logic        tap_tdo,
-    
+
     // TAP control signals
     input  logic        shift_dr,
     input  logic        shift_ir,
@@ -640,17 +640,17 @@ module jtag_scan_chain #(
     input  logic        capture_ir,
     input  logic        update_dr,
     input  logic        update_ir,
-    
+
     // Downstream TAP interfaces
     output logic [NUM_TAPS-1:0] tap_tck_out,
     output logic [NUM_TAPS-1:0] tap_tms_out,
     output logic [NUM_TAPS-1:0] tap_tdi_out,
     input  logic [NUM_TAPS-1:0] tap_tdo_in,
-    
+
     // TAP selection
     input  logic [$clog2(NUM_TAPS)-1:0] selected_tap,
     output logic [NUM_TAPS-1:0]         tap_active,
-    
+
     // Chain status
     output logic [15:0] total_ir_length,
     output logic [15:0] total_dr_length
@@ -701,26 +701,26 @@ module cjtag_crc_parity #(
 )(
     input  logic        clk,
     input  logic        rst_n,
-    
+
     // Data input interface
     input  logic [7:0]  data_byte,
     input  logic        data_valid,
     input  logic        data_last,
-    
+
     // CRC/Parity outputs
     output logic [7:0]  crc_value,
     output logic        parity_bit,
-    
+
     // Error detection
     input  logic [7:0]  expected_crc,
     input  logic        expected_parity,
     output logic        crc_error,
     output logic        parity_error,
-    
+
     // Error statistics
     output logic [15:0] crc_error_count,
     output logic [15:0] parity_error_count,
-    
+
     // Control
     input  logic        clear_errors
 );

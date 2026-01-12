@@ -159,7 +159,7 @@ VPI Interface (vpi/jtag_vpi.c)
     ├── Accepts client connections on port 3333
     ├── Processes JTAG protocol commands
     └── Reads/writes signals from/to simulation
-    
+
 External Tests
     ├── OpenOCD (via VPI adapter)
     │   └── Used by: make test-jtag, make test-cjtag

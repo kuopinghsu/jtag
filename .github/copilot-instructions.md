@@ -14,8 +14,8 @@
   - VPI debug levels: `DEBUG=1 make vpi-sim` shows concise server activity (connections, protocol detects); `DEBUG=2 make vpi-sim` adds verbose per-scan logging—useful when chasing OpenOCD packet handling.
 - OpenOCD integration:
   - Configs in [openocd/jtag.cfg](../openocd/jtag.cfg) and [openocd/cjtag.cfg](../openocd/cjtag.cfg).
-  - `make test-jtag` runs end-to-end OpenOCD JTAG flow (reads IDCODE 0x1DEAD3FF).
-  - `make test-cjtag` is experimental: VPI currently forces JTAG mode; OpenOCD stock driver lacks cJTAG commands.
+  - `make test-jtag` runs end-to-end OpenOCD JTAG flow (reads IDCODE 0x1DEAD3FF) - 19/19 tests passing.
+  - `make test-cjtag` runs end-to-end OpenOCD cJTAG flow - 15/15 tests passing (fixed in v2.1).
   - For real cJTAG, apply patches in [openocd/patched](../openocd/patched) per [docs/OPENOCD_CJTAG_PATCH_GUIDE.md](../docs/OPENOCD_CJTAG_PATCH_GUIDE.md).
 - RTL conventions:
   - cJTAG OScan1 controller handles OAC, JScan, zero insertion/deletion, CRC-8 (x^8 + x^2 + x + 1) with parity; see [docs/OSCAN1_IMPLEMENTATION.md](../docs/OSCAN1_IMPLEMENTATION.md).
@@ -24,9 +24,9 @@
 - Synthesis flow:
   - OSS CAD Suite + ASAP7; run `make synth` or module-specific `make synth-jtag`, `make synth-dbg`, `make synth-system`; scripts in [syn/scripts](../syn/scripts).
   - Outputs under `syn/results/`, reports under `syn/reports/`; clean with `make synth-clean`.
-- Testing expectations (QuickStart): `make sim` should pass 5 tests (TAP reset, IDCODE JTAG/cJTAG, debug request, mode switch). VPI/OpenOCD quick smoke via `make test-vpi`/`make test-jtag`.
+- Testing expectations (QuickStart): `make sim` should pass 5 tests (TAP reset, IDCODE JTAG/cJTAG, debug request, mode switch). VPI/OpenOCD integration: `make test-jtag` passes 19/19, `make test-cjtag` passes 15/15 (as of v2.1).
+- Recent fixes (v2.1 - 2026-01-12): VPI server packet parsing fixed to handle full 1036-byte OpenOCD VPI packets; cJTAG IR/DR scans now return correct data. See [FIX_SUMMARY.md](../FIX_SUMMARY.md).
 - Known pitfalls:
-  - VPI cJTAG flag (`--cjtag`) currently overridden by `pending_mode_select=0`; cJTAG validation requires direct sim (no VPI) or patched OpenOCD.
   - `jtag_vpi_client.c` uses legacy 4-byte protocol; OpenOCD uses 1036-byte packets—do not expect compatibility.
   - Waveform tracing disabled by default; use `DUMP_FST=1` and optionally `ENABLE_FST=1` when building.
 - Useful docs: [README.md](../README.md) for features/commands, [QUICKSTART.md](../QUICKSTART.md) for expected outputs, [docs/PROTOCOL_TESTING.md](../docs/PROTOCOL_TESTING.md) if present, [docs/OPENOCD_VPI_TECHNICAL_GUIDE.md](../docs/OPENOCD_VPI_TECHNICAL_GUIDE.md) for protocol details.

@@ -36,18 +36,18 @@ static int sock = -1;
 int jtag_vpi_connect(const char *ip, int port) {
     struct sockaddr_in addr;
     int retries = 0;
-    
+
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         perror("socket");
         return -1;
     }
-    
+
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr(ip);
     addr.sin_port = htons(port);
-    
+
     // Retry connection a few times
     while (retries < 10) {
         if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
@@ -57,7 +57,7 @@ int jtag_vpi_connect(const char *ip, int port) {
         retries++;
         usleep(500000);  // 500ms
     }
-    
+
     perror("connect");
     return -1;
 }
@@ -68,26 +68,26 @@ int jtag_vpi_connect(const char *ip, int port) {
 int jtag_vpi_send_cmd(unsigned char cmd, unsigned char tms, unsigned char tdi, unsigned char *tdo) {
     jtag_cmd_t cmd_pkt;
     jtag_resp_t resp;
-    
+
     cmd_pkt.cmd = cmd;
     cmd_pkt.tms_val = tms;
     cmd_pkt.tdi_val = tdi;
     cmd_pkt.pad = 0;
-    
+
     if (send(sock, &cmd_pkt, sizeof(cmd_pkt), 0) < 0) {
         perror("send");
         return -1;
     }
-    
+
     if (recv(sock, &resp, sizeof(resp), 0) < 0) {
         perror("recv");
         return -1;
     }
-    
+
     if (tdo) {
         *tdo = resp.tdo_val;
     }
-    
+
     return resp.response;
 }
 
@@ -97,22 +97,22 @@ int jtag_vpi_send_cmd(unsigned char cmd, unsigned char tms, unsigned char tdi, u
 unsigned int jtag_read_idcode(void) {
     jtag_cmd_t cmd_pkt;
     jtag_resp_t resp;
-    
+
     cmd_pkt.cmd = 0x02;  // Read IDCODE
     cmd_pkt.tms_val = 0;
     cmd_pkt.tdi_val = 0;
     cmd_pkt.pad = 0;
-    
+
     if (send(sock, &cmd_pkt, sizeof(cmd_pkt), 0) < 0) {
         perror("send");
         return 0;
     }
-    
+
     if (recv(sock, &resp, sizeof(resp), 0) < 0) {
         perror("recv");
         return 0;
     }
-    
+
     return *(unsigned int*)&resp.status;
 }
 
@@ -123,20 +123,20 @@ int main(void) {
     unsigned char tdo;
     unsigned int idcode;
     int i;
-    
+
     printf("JTAG VPI Client - OpenOCD-Compatible\n");
     printf("=====================================\n\n");
-    
+
     // Connect to server
     if (jtag_vpi_connect(SERVER_IP, SERVER_PORT) < 0) {
         fprintf(stderr, "Failed to connect to JTAG VPI server\n");
         fprintf(stderr, "Make sure simulation is running with VPI support\n");
         return 1;
     }
-    
+
     // Wait a bit for simulation to settle
     sleep(1);
-    
+
     // Test 1: Reset TAP controller
     printf("\n[1] Resetting TAP controller...\n");
     for (i = 0; i < 5; i++) {
@@ -145,7 +145,7 @@ int main(void) {
     }
     (void)jtag_vpi_send_cmd(0x01, 0, 0, &tdo);
     printf("  Final: TMS=0\n");
-    
+
     // Test 2: Read IDCODE
     printf("\n[2] Reading IDCODE...\n");
     sleep(1);
@@ -154,7 +154,7 @@ int main(void) {
     printf("  Version: 0x%x\n", (idcode >> 28) & 0xF);
     printf("  PartNumber: 0x%x\n", (idcode >> 12) & 0xFFFF);
     printf("  Manufacturer: 0x%x\n", (idcode >> 1) & 0x7FF);
-    
+
     // Test 3: Get active mode
     printf("\n[3] Checking active mode...\n");
     jtag_cmd_t cmd_pkt;
@@ -163,9 +163,9 @@ int main(void) {
     send(sock, &cmd_pkt, sizeof(cmd_pkt), 0);
     recv(sock, &resp, sizeof(resp), 0);
     printf("  Active mode: %s\n", resp.mode ? "cJTAG (OScan1)" : "JTAG");
-    
+
     printf("\n[*] Test completed\n");
-    
+
     close(sock);
     return 0;
 }

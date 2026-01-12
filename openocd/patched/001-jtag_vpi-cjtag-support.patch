@@ -16,130 +16,130 @@ index fac27b306..f7c39c1ad 100644
 +++ b/src/jtag/drivers/jtag_vpi.c
 @@ -23,6 +23,7 @@
  #endif
- 
+
  #include "helper/replacements.h"
 +#include "oscan1.h"
- 
- #define NO_TAP_SHIFT	0
- #define TAP_SHIFT	1
+
+ #define NO_TAP_SHIFT   0
+ #define TAP_SHIFT  1
 @@ -37,6 +38,7 @@
- #define CMD_SCAN_CHAIN		2
- #define CMD_SCAN_CHAIN_FLIP_TMS	3
- #define CMD_STOP_SIMU		4
+ #define CMD_SCAN_CHAIN     2
+ #define CMD_SCAN_CHAIN_FLIP_TMS    3
+ #define CMD_STOP_SIMU      4
 +#define CMD_OSCAN1               5
- 
+
  /* jtag_vpi server port and address to connect to */
  static int server_port = DEFAULT_SERVER_PORT;
 @@ -45,6 +47,9 @@ static char *server_address;
  /* Send CMD_STOP_SIMU to server when OpenOCD exits? */
  static bool stop_sim_on_exit;
- 
+
 +/* cJTAG mode flag */
 +static bool jtag_vpi_cjtag_mode = false;
 +
  static int sockfd;
  static struct sockaddr_in serv_addr;
- 
+
 @@ -79,6 +84,8 @@ static char *jtag_vpi_cmd_to_str(int cmd_num)
- 		return "CMD_SCAN_CHAIN_FLIP_TMS";
- 	case CMD_STOP_SIMU:
- 		return "CMD_STOP_SIMU";
-+	case CMD_OSCAN1:
-+		return "CMD_OSCAN1";
- 	default:
- 		return "<unknown>";
- 	}
+        return "CMD_SCAN_CHAIN_FLIP_TMS";
+    case CMD_STOP_SIMU:
+        return "CMD_STOP_SIMU";
++   case CMD_OSCAN1:
++       return "CMD_OSCAN1";
+    default:
+        return "<unknown>";
+    }
 @@ -226,6 +233,18 @@ static int jtag_vpi_tms_seq(const uint8_t *bits, int nb_bits)
- 	struct vpi_cmd vpi;
- 	int nb_bytes;
- 
-+	/* In cJTAG mode, encode TMS transitions using OScan1 SF0 (TMS on rising edge).
-+	 * Use TDI=1 as a don't-care to avoid unintended data shifts. */
-+	if (jtag_vpi_cjtag_mode) {
-+		for (int i = 0; i < nb_bits; i++) {
-+			uint8_t tms = (bits[i / 8] >> (i % 8)) & 0x1;
-+			uint8_t dummy_tdo = 0;
-+			int ret = oscan1_sf0_encode(tms, 1, &dummy_tdo);
-+			if (ret != ERROR_OK)
-+				return ret;
-+		}
-+		return ERROR_OK;
-+	}
- 	memset(&vpi, 0, sizeof(struct vpi_cmd));
- 	nb_bytes = DIV_ROUND_UP(nb_bits, 8);
- 
+    struct vpi_cmd vpi;
+    int nb_bytes;
+
++   /* In cJTAG mode, encode TMS transitions using OScan1 SF0 (TMS on rising edge).
++    * Use TDI=1 as a don't-care to avoid unintended data shifts. */
++   if (jtag_vpi_cjtag_mode) {
++       for (int i = 0; i < nb_bits; i++) {
++           uint8_t tms = (bits[i / 8] >> (i % 8)) & 0x1;
++           uint8_t dummy_tdo = 0;
++           int ret = oscan1_sf0_encode(tms, 1, &dummy_tdo);
++           if (ret != ERROR_OK)
++               return ret;
++       }
++       return ERROR_OK;
++   }
+    memset(&vpi, 0, sizeof(struct vpi_cmd));
+    nb_bytes = DIV_ROUND_UP(nb_bits, 8);
+
 @@ -291,6 +310,26 @@ static int jtag_vpi_state_move(enum tap_state state)
- 
+
  static int jtag_vpi_queue_tdi_xfer(uint8_t *bits, int nb_bits, int tap_shift)
  {
-+	/* In cJTAG mode, translate shifts into OScan1 SF0 cycles (TMS on rising, TDI on falling).
-+	 * Maintain the existing bit ordering: LSB-first per OpenOCD buffer layout. */
-+	if (jtag_vpi_cjtag_mode) {
-+		for (int bit = 0; bit < nb_bits; bit++) {
-+			uint8_t tms = (tap_shift && (bit == nb_bits - 1)) ? 1 : 0;
-+			uint8_t tdi = bits ? ((bits[bit / 8] >> (bit % 8)) & 0x1) : 1;
-+			uint8_t tdo = 0;
-+			int ret = oscan1_sf0_encode(tms, tdi, &tdo);
-+			if (ret != ERROR_OK)
-+				return ret;
-+			if (bits) {
-+				if (tdo)
-+					bits[bit / 8] |= (1 << (bit % 8));
-+				else
-+					bits[bit / 8] &= ~(1 << (bit % 8));
-+			}
-+		}
-+		return ERROR_OK;
-+	}
++   /* In cJTAG mode, translate shifts into OScan1 SF0 cycles (TMS on rising, TDI on falling).
++    * Maintain the existing bit ordering: LSB-first per OpenOCD buffer layout. */
++   if (jtag_vpi_cjtag_mode) {
++       for (int bit = 0; bit < nb_bits; bit++) {
++           uint8_t tms = (tap_shift && (bit == nb_bits - 1)) ? 1 : 0;
++           uint8_t tdi = bits ? ((bits[bit / 8] >> (bit % 8)) & 0x1) : 1;
++           uint8_t tdo = 0;
++           int ret = oscan1_sf0_encode(tms, tdi, &tdo);
++           if (ret != ERROR_OK)
++               return ret;
++           if (bits) {
++               if (tdo)
++                   bits[bit / 8] |= (1 << (bit % 8));
++               else
++                   bits[bit / 8] &= ~(1 << (bit % 8));
++           }
++       }
++       return ERROR_OK;
++   }
 +
- 	struct vpi_cmd vpi;
- 	int nb_bytes = DIV_ROUND_UP(nb_bits, 8);
- 
+    struct vpi_cmd vpi;
+    int nb_bytes = DIV_ROUND_UP(nb_bits, 8);
+
 @@ -562,6 +601,16 @@ static int jtag_vpi_init(void)
- 
- 	LOG_INFO("jtag_vpi: Connection to %s : %u successful", server_address, server_port);
- 
-+	/* Initialize OScan1 protocol if cJTAG mode is enabled */
-+	if (jtag_vpi_cjtag_mode) {
-+		LOG_INFO("jtag_vpi: cJTAG mode enabled, initializing OScan1 protocol");
-+		if (oscan1_init() != ERROR_OK) {
-+			LOG_ERROR("jtag_vpi: Failed to initialize OScan1 protocol");
-+			close(sockfd);
-+			return ERROR_FAIL;
-+		}
-+	}
+
+    LOG_INFO("jtag_vpi: Connection to %s : %u successful", server_address, server_port);
+
++   /* Initialize OScan1 protocol if cJTAG mode is enabled */
++   if (jtag_vpi_cjtag_mode) {
++       LOG_INFO("jtag_vpi: cJTAG mode enabled, initializing OScan1 protocol");
++       if (oscan1_init() != ERROR_OK) {
++           LOG_ERROR("jtag_vpi: Failed to initialize OScan1 protocol");
++           close(sockfd);
++           return ERROR_FAIL;
++       }
++   }
 +
- 	return ERROR_OK;
+    return ERROR_OK;
  }
- 
+
 @@ -588,6 +637,9 @@ static int jtag_vpi_quit(void)
- 	free(server_address);
- 	return ERROR_OK;
+    free(server_address);
+    return ERROR_OK;
  }
 +/* Forward declaration */
 +COMMAND_HANDLER(jtag_vpi_enable_cjtag_handler);
 +
- 
+
  COMMAND_HANDLER(jtag_vpi_set_port)
  {
 @@ -645,6 +697,13 @@ static const struct command_registration jtag_vpi_subcommand_handlers[] = {
- 			"before OpenOCD exits (default: off)",
- 		.usage = "<on|off>",
- 	},
-+	{
-+		.name = "enable_cjtag",
-+		.handler = &jtag_vpi_enable_cjtag_handler,
-+		.mode = COMMAND_CONFIG,
-+		.help = "enable cJTAG/OScan1 two-wire protocol mode",
-+		.usage = "<on|off>",
-+	},
- 	COMMAND_REGISTRATION_DONE
+            "before OpenOCD exits (default: off)",
+        .usage = "<on|off>",
+    },
++   {
++       .name = "enable_cjtag",
++       .handler = &jtag_vpi_enable_cjtag_handler,
++       .mode = COMMAND_CONFIG,
++       .help = "enable cJTAG/OScan1 two-wire protocol mode",
++       .usage = "<on|off>",
++   },
+    COMMAND_REGISTRATION_DONE
  };
- 
+
 @@ -664,6 +723,44 @@ static struct jtag_interface jtag_vpi_interface = {
- 	.execute_queue = jtag_vpi_execute_queue,
+    .execute_queue = jtag_vpi_execute_queue,
  };
- 
+
 +
 +/* Last CMD_OSCAN1 response (TDO bit on TMSC line) */
 +static uint8_t last_oscan1_response = 0;
@@ -148,36 +148,36 @@ index fac27b306..f7c39c1ad 100644
 +/* cJTAG / OScan1 protocol support */
 +int jtag_vpi_send_tckc_tmsc(uint8_t tckc, uint8_t tmsc)
 +{
-+	struct vpi_cmd vpi;
-+	int retval;
-+	memset(&vpi, 0, sizeof(struct vpi_cmd));
-+	vpi.cmd = CMD_OSCAN1;
-+	vpi.length = 1;
-+	vpi.nb_bits = 2;
-+	vpi.buffer_out[0] = (tckc & 0x01) | ((tmsc & 0x01) << 1);
-+	retval = jtag_vpi_send_cmd(&vpi);
-+	if (retval == ERROR_OK) {
-+		/* Store TDO bit from response */
-+		last_oscan1_response = vpi.buffer_in[0] & 0x01;
-+	}
-+	return retval;
++   struct vpi_cmd vpi;
++   int retval;
++   memset(&vpi, 0, sizeof(struct vpi_cmd));
++   vpi.cmd = CMD_OSCAN1;
++   vpi.length = 1;
++   vpi.nb_bits = 2;
++   vpi.buffer_out[0] = (tckc & 0x01) | ((tmsc & 0x01) << 1);
++   retval = jtag_vpi_send_cmd(&vpi);
++   if (retval == ERROR_OK) {
++       /* Store TDO bit from response */
++       last_oscan1_response = vpi.buffer_in[0] & 0x01;
++   }
++   return retval;
 +}
 +
 +uint8_t jtag_vpi_receive_tmsc(void)
 +{
-+	return last_oscan1_response;
++   return last_oscan1_response;
 +}
 +
 +COMMAND_HANDLER(jtag_vpi_enable_cjtag_handler)
 +{
-+	if (CMD_ARGC != 1)
-+		return ERROR_COMMAND_SYNTAX_ERROR;
++   if (CMD_ARGC != 1)
++       return ERROR_COMMAND_SYNTAX_ERROR;
 +
-+	COMMAND_PARSE_ON_OFF(CMD_ARGV[0], jtag_vpi_cjtag_mode);
-+	LOG_INFO("cJTAG mode %s", jtag_vpi_cjtag_mode ? "enabled" : "disabled");
-+	return ERROR_OK;
++   COMMAND_PARSE_ON_OFF(CMD_ARGV[0], jtag_vpi_cjtag_mode);
++   LOG_INFO("cJTAG mode %s", jtag_vpi_cjtag_mode ? "enabled" : "disabled");
++   return ERROR_OK;
 +}
 +
  struct adapter_driver jtag_vpi_adapter_driver = {
- 	.name = "jtag_vpi",
- 	.transport_ids = TRANSPORT_JTAG,
+    .name = "jtag_vpi",
+    .transport_ids = TRANSPORT_JTAG,

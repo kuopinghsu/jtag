@@ -609,7 +609,7 @@ make test-jtag         # 17 JTAG protocol tests
 make test-cjtag        # 16 cJTAG protocol tests
 
 # Run all protocol tests
-make test-all-protocols  # All 50 tests (11 + 17 + 16 + 6 combo)
+make test-all-protocols  # All 51 tests (11 legacy + 19 JTAG + 15 cJTAG + 6 combo)
 ```
 
 ## License

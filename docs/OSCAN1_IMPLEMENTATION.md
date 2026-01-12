@@ -69,7 +69,7 @@ States:
 ```
 Physical Pins          OScan1 Controller        TAP Controller
     TCKC  ──────────>  Edge Detect ────>
-                       OAC Detector      
+                       OAC Detector
                        JScan Parser
                        Zero Deletion
                        SF0 Decoder  ────> jtag_tck ──> TAP

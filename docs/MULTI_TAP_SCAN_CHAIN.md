@@ -25,9 +25,9 @@ The multi-TAP scan chain controller enables multiple JTAG TAP controllers to be 
         └─────────────────────────────────────────────────┘
                 │                                │
         TDI ────┼────┬────┬────┬────┬────────────┼──── TDO
-                     │    │    │    │             
-                   TAP0  TAP1  TAP2  TAP3        
-                   (IR=8)(IR=8)(IR=6)(IR=10)     
+                     │    │    │    │
+                   TAP0  TAP1  TAP2  TAP3
+                   (IR=8)(IR=8)(IR=6)(IR=10)
 ```
 
 ### Signal Flow
@@ -60,13 +60,13 @@ module jtag_scan_chain #(
 )(
     input  logic        clk,
     input  logic        rst_n,
-    
+
     // Upstream JTAG (from jtag_interface)
     input  logic        tap_tck,
     input  logic        tap_tms,
     input  logic        tap_tdi,
     output logic        tap_tdo,
-    
+
     // TAP control signals
     input  logic        shift_dr,
     input  logic        shift_ir,
@@ -74,17 +74,17 @@ module jtag_scan_chain #(
     input  logic        capture_ir,
     input  logic        update_dr,
     input  logic        update_ir,
-    
+
     // Downstream TAP interfaces (to individual TAPs)
     output logic [NUM_TAPS-1:0] tap_tck_out,
     output logic [NUM_TAPS-1:0] tap_tms_out,
     output logic [NUM_TAPS-1:0] tap_tdi_out,
     input  logic [NUM_TAPS-1:0] tap_tdo_in,
-    
+
     // TAP selection
     input  logic [$clog2(NUM_TAPS)-1:0] selected_tap,
     output logic [NUM_TAPS-1:0]         tap_active,
-    
+
     // Chain status
     output logic [15:0] total_ir_length,
     output logic [15:0] total_dr_length
@@ -270,7 +270,7 @@ parameter int IR_LENGTHS [4] = '{8, 8, 6, 10};
 module riscv_soc (
     input  logic clk,
     input  logic rst_n,
-    
+
     // JTAG interface
     input  logic jtag_tck,
     input  logic jtag_tms,
@@ -281,7 +281,7 @@ module riscv_soc (
     logic [2:0] core_tck, core_tms, core_tdi, core_tdo;
     logic [2:0] tap_active;
     logic [1:0] selected_core;
-    
+
     // Scan chain controller
     jtag_scan_chain #(
         .NUM_TAPS(3),
@@ -302,7 +302,7 @@ module riscv_soc (
         .selected_tap(selected_core),
         .tap_active(tap_active)
     );
-    
+
     // Core 0 debug TAP
     jtag_top core0_dbg (
         .tck(core_tck[0]),
@@ -311,7 +311,7 @@ module riscv_soc (
         .tdo(core_tdo[0]),
         ...
     );
-    
+
     // Core 1 debug TAP
     jtag_top core1_dbg (
         .tck(core_tck[1]),
@@ -320,7 +320,7 @@ module riscv_soc (
         .tdo(core_tdo[1]),
         ...
     );
-    
+
     // Core 2 debug TAP
     jtag_top core2_dbg (
         .tck(core_tck[2]),

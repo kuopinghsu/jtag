@@ -4,7 +4,7 @@
 
 ✅ **All Tests Passing**
 - **JTAG**: 19/19 tests PASSED
-- **cJTAG**: 15/15 tests PASSED  
+- **cJTAG**: 15/15 tests PASSED
 - **Legacy**: 11/11 tests available
 - **Combo**: 6/6 tests available
 - **Total**: 51 comprehensive protocol tests

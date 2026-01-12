@@ -63,7 +63,7 @@ sudo apt-get install gtkwave  # Linux
 gtkwave jtag_sim.fst
 ```
 
-**Note on cJTAG Testing**: Test 4 and 5 verify cJTAG mode switching in standalone simulation. For VPI/OpenOCD testing, cJTAG mode is not currently supported due to protocol limitations (see README TODO section).
+**Note on cJTAG Testing**: Test 4 and 5 verify cJTAG mode switching in standalone simulation. For VPI/OpenOCD testing, cJTAG is now fully supported - see `make test-cjtag` (15/15 tests passing as of v2.1).
 
 ## Option 2: Interactive VPI Testing
 
@@ -110,7 +110,7 @@ Parsed IDCODE:
   Version:      0x1
   Part Number:  0xDEAD
   Manufacturer: 0x1FF
-  
+
 ✓ Test completed successfully
 ```
 

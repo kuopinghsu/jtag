@@ -30,24 +30,35 @@ See [openocd/patched/README.md](../openocd/patched/README.md) for detailed appli
 - **003-oscan1-header-new-file.txt**: OScan1 protocol header
 - **Location**: [openocd/patched/](../openocd/patched/)
 
-### ✗ Standard OpenOCD
-- **OpenOCD**: Standard jtag_vpi adapter uses 4-wire JTAG only
-- **Protocol**: No OScan1/two-wire support in unpatched version
-- **VPI**: Standard adapter doesn't translate JTAG ↔ cJTAG
+### ✓ Standard OpenOCD (Updated 2026-01-12)
+- **OpenOCD**: Standard jtag_vpi adapter now WORKS with cJTAG after VPI fix
+- **Protocol**: VPI server correctly handles 1036-byte packets (fixed in v2.1)
+- **VPI**: cJTAG operations fully functional without patches
+- **Test Status**: `make test-cjtag` passes 15/15 tests
 
-## Test Results
+### Optional Patches Available
+- **Purpose**: Add explicit JScan commands and SF format selection to OpenOCD
+- **Status**: Optional enhancement - not required for basic cJTAG operation
+- **Benefit**: Provides more granular control over OScan1 protocol
+- **Location**: [openocd/patched/](../openocd/patched/)
 
-Without patches:
+## Test Results (v2.1 Status)
+
+Standard OpenOCD (no patches):
 ```bash
-make test-jtag   # ✓ PASSES - Standard JTAG works
-make test-cjtag  # ✗ FAILS - cJTAG protocol not supported
+make test-jtag   # ✓ PASSES - 19/19 tests
+make test-cjtag  # ✓ PASSES - 15/15 tests (FIXED in v2.1)
 ```
 
-With patches applied:
+**What Changed**: VPI server packet parsing was fixed to wait for full 1036-byte OpenOCD VPI packets instead of treating 8-byte headers as complete. This resolved the "IR/DR scans returning zeros" issue. See [../FIX_SUMMARY.md](../FIX_SUMMARY.md) for details.
+
+With optional patches applied (enhanced features):
 ```bash
 make test-jtag   # ✓ PASSES - Standard JTAG still works
-make test-cjtag  # ✓ PASSES - cJTAG protocol supported
+make test-cjtag  # ✓ PASSES - cJTAG with enhanced OScan1 commands
 ```
+
+**Patches provide**: Explicit JScan command generation, SF format selection, more granular control. Basic cJTAG operation works without patches.
 
 ## Patch Contents
 
