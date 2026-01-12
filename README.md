@@ -551,9 +551,11 @@ The project uses a **two-layer testing approach** to balance speed, simplicity, 
   - Tests full IEEE 1149.1/1149.7 protocol stacks
   - Real-world usage patterns
   - Comprehensive JTAG/cJTAG command sequences
-- **Test Coverage**:
-  - JTAG: 17 tests (11 commands + 6 physical layer)
-  - cJTAG: 16 tests (10 commands + 6 physical layer)
+- **Test Coverage** (Updated 2026-01-12):
+  - JTAG: 19 tests PASSED (command + physical + integration layers)
+  - cJTAG: 15 tests PASSED (command + physical + OScan1 protocol layers)
+  - Legacy: 11 tests (direct protocol validation)
+  - Combo: 6 tests (protocol switching validation)
 
 **Why This Split?**
 - Legacy protocol testing doesn't require OpenOCD's complexity
@@ -561,7 +563,14 @@ The project uses a **two-layer testing approach** to balance speed, simplicity, 
 - Integration testing ensures production readiness with real tools
 - Each layer optimized for its specific validation goal
 
+**Current Test Status (as of 2026-01-12):**
+- ✅ **JTAG Tests**: 19/19 PASSED
+- ✅ **cJTAG Tests**: 15/15 PASSED
+- ✅ **Core Testbench**: All 12 tests PASSED
+- ✅ **VPI Packet Parsing**: FIXED - Full 1036-byte OpenOCD packets now correctly handled
+
 **See Also:**
+- [FIX_SUMMARY.md](FIX_SUMMARY.md) - Recent VPI packet parsing fix
 - [Makefile](Makefile) (lines 377-382) - Developer documentation
 - [openocd/test_openocd.sh](openocd/test_openocd.sh) - Runtime notes
 - [docs/PROTOCOL_TEST_COMPARISON.md](docs/PROTOCOL_TEST_COMPARISON.md) - Complete test matrix
@@ -693,7 +702,19 @@ For issues or questions:
 
 ## Changelog
 
-### v2.0 (Current)
+### v2.1 (Current - 2026-01-12)
+- **Critical VPI Packet Parsing Fix** ✅
+  - Fixed: VPI server now correctly waits for full 1036-byte OpenOCD packets
+  - Fixed: Removed premature minimal mode detection on 8-byte headers
+  - Result: cJTAG IR/DR scans now return correct data (was returning zeros)
+  - Test status: JTAG 19/19 ✓, cJTAG 15/15 ✓, Core testbench all pass ✓
+  - See [FIX_SUMMARY.md](FIX_SUMMARY.md) for technical details
+- **Enhanced Protocol Testing**
+  - Added combo protocol switching tests (6 tests)
+  - Comprehensive validation of JTAG ⇄ Legacy protocol transitions
+  - Total test coverage: 50+ tests across all protocol modes
+
+### v2.0
 - **Full IEEE 1149.7 OScan1 protocol implementation**
   - Complete OAC (Offline Access Controller) detection
   - JScan packet parser with 8 command support

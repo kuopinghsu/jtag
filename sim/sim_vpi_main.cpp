@@ -141,6 +141,8 @@ int main(int argc, char** argv) {
     } else {
         vpi_server.set_protocol_mode(JtagVpiServer::PROTO_UNKNOWN);
     }
+    // Set initial mode from command-line flag
+    vpi_server.set_mode(cjtag_mode ? 1 : 0);
 
     if (trace_enabled) {
 #if ENABLE_FST
@@ -170,7 +172,30 @@ int main(int argc, char** argv) {
     }
     top->rst_n = 1;
     top->jtag_trst_n_i = 1;
-    std::cout << "[SIM] Reset released" << std::endl;
+
+    // After reset release, ensure TAP is in Test-Logic-Reset state
+    // by pulsing TMS high for 5 cycles
+    std::cout << "[SIM] Reset released, initializing TAP to Test-Logic-Reset..." << std::endl;
+    top->jtag_pin1_i = 1;  // TMS high
+    for (int i = 0; i < 5; i++) {
+        top->jtag_pin0_i = 1;  // TCK rising
+        top->clk = !top->clk;
+        top->eval();
+    #if ENABLE_FST
+        if (trace) trace->dump(contextp->time());
+    #endif
+        contextp->timeInc(1);
+
+        top->jtag_pin0_i = 0;  // TCK falling
+        top->clk = !top->clk;
+        top->eval();
+    #if ENABLE_FST
+        if (trace) trace->dump(contextp->time());
+    #endif
+        contextp->timeInc(1);
+    }
+    top->jtag_pin1_i = 0;  // TMS back to low
+    std::cout << "[SIM] TAP initialized to Test-Logic-Reset state" << std::endl;
 
     std::cout << "[SIM] Cycle: " << cycle_count
               << " | IDCODE: 0x" << std::hex << top->idcode

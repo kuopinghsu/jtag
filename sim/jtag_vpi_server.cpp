@@ -43,14 +43,15 @@ JtagVpiServer::JtagVpiServer(int port)
             scan_bit_index(0), scan_bytes_received(0), scan_bytes_sent(0) {
     pending_tms = 0;
     pending_tdi = 0;
-    pending_mode_select = 0;
+    pending_mode_select = 0;  // Will be set by set_mode() from command-line
     pending_tck_pulse = false;
     reset_pulses_remaining = 0;
     tckc_state = 0;
     pending_tckc_toggle = false;
+    tckc_toggle_consumed = false;  // Initialize SF0 synchronization flag
     current_tdo = 0;
     current_idcode = 0;
-    current_mode = 0;
+    current_mode = 0;  // Will be updated by simulation feedback
     debug_level = 0;  // Default: no debug output
     // Initialize command buffer
     memset(cmd_buf, 0, sizeof(cmd_buf));
@@ -172,25 +173,15 @@ void JtagVpiServer::poll() {
             DBG_PRINT(2, "[VPI][DBG] Protocol detection: cmd_byte=0x%02x, bytes=%d\n", cmd_byte, minimal_rx_bytes);
 
             if (minimal_rx_bytes >= sizeof(minimal_cmd_rx)) {
-                // Any 8-byte header defaults to minimal OpenOCD packets (used by test_protocol)
-                DBG_PRINT(1, "[VPI][DBG] Detected Minimal OpenOCD protocol (cmd=0x%02x)\n", cmd_byte);
-                protocol_mode = PROTO_OPENOCD_VPI;
-                vpi_minimal_mode = true;
-                vpi_rx_bytes = sizeof(minimal_cmd_rx);
-            } else if (minimal_rx_bytes > sizeof(minimal_cmd_rx)) {
-                DBG_PRINT(1, "[VPI][DBG] Detected OpenOCD protocol (bytes=%d > 8)\n", minimal_rx_bytes);
+                // Have at least 8 bytes - check if we should continue reading for full packet
+                // Default to OpenOCD protocol (which uses 1036-byte packets)
+                DBG_PRINT(1, "[VPI][DBG] OpenOCD protocol detected (cmd=0x%02x), waiting for full packet\n", cmd_byte);
                 protocol_mode = PROTO_OPENOCD_VPI;
                 memcpy(&vpi_cmd_rx, &minimal_cmd_rx, sizeof(minimal_cmd_rx));
                 vpi_rx_bytes = sizeof(minimal_cmd_rx);
                 minimal_rx_bytes = 0;
                 memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
-            } else if (minimal_rx_bytes == sizeof(minimal_cmd_rx) && cmd_byte > 0x06) {
-                DBG_PRINT(1, "[VPI][DBG] Detected Legacy protocol (cmd=0x%02x, bytes=8)\n", cmd_byte);
-                protocol_mode = PROTO_LEGACY_8BYTE;
-                memcpy(cmd_buf, &minimal_cmd_rx, sizeof(minimal_cmd_rx));
-                cmd_bytes_received = sizeof(minimal_cmd_rx);
-                minimal_rx_bytes = 0;
-                memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
+                vpi_minimal_mode = false;  // Don't use minimal mode - wait for full 1036-byte packet
             } else {
                 return;
             }
@@ -259,23 +250,10 @@ void JtagVpiServer::poll() {
             }
         }
 
-        // We have at least 8 bytes - ALWAYS check if more data is coming
-        // This handles both the first command AND subsequent commands
-        if (vpi_rx_bytes == 8) {
-            // Always treat 8-byte commands as minimal packets
-            vpi_minimal_mode = true;
-            process_vpi_packet();
-            DBG_PRINT(2, "[VPI][DBG] After process_vpi_packet, resetting rx buffer\n");
-            vpi_rx_bytes = 0;
-            memset(&vpi_cmd_rx, 0, sizeof(vpi_cmd_rx));
-            minimal_rx_bytes = 0;
-            memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
-            DBG_PRINT(2, "[VPI][DBG] Minimal packet processed, ready for next command\n");
-            return;
-        }
-
-        // Continue filling until we have full 1036-byte packet (only if NOT in minimal mode)
-        if (!vpi_minimal_mode && vpi_rx_bytes < VPI_PKT_SIZE) {
+        // We have at least 8 bytes - continue reading until we have full packet
+        // OpenOCD VPI packets are 1036 bytes, not 8 bytes
+        // DO NOT treat 8 bytes as complete - must read full packet
+        if (vpi_rx_bytes < VPI_PKT_SIZE) {
             ssize_t ret = recv(client_sock, ((uint8_t*)&vpi_cmd_rx) + vpi_rx_bytes,
                                VPI_PKT_SIZE - vpi_rx_bytes, MSG_DONTWAIT);
             if (ret < 0) {
@@ -533,41 +511,43 @@ void JtagVpiServer::process_vpi_packet() {
             break;
         }
         case 5: { // CMD_OSCAN1 - two-wire cJTAG/OScan1 operation
-            // Format: buffer_out[0] = (tckc & 1) | ((tmsc & 1) << 1)
-            // Extract TCKC and TMSC bits
-            uint8_t tckc = vpi_cmd_rx.buffer_out[0] & 1;
-            uint8_t tmsc = (vpi_cmd_rx.buffer_out[0] >> 1) & 1;
+            // OScan1 SF0 protocol:
+            // - Sends TMS on TCKC rising edge (cmd.buffer_out[0] bit 1 = TMS)
+            // - Sends TDI on TCKC falling edge (cmd.buffer_out[0] bit 0 = TDI)
+            // - Returns captured TDO on TMSC (response.buffer_in[0] = TDO)
+
+            // Extract SF0 control bits from command
+            uint8_t tdi = vpi_cmd_rx.buffer_out[0] & 1;      // Bit 0: TDI (falling edge)
+            uint8_t tms = (vpi_cmd_rx.buffer_out[0] >> 1) & 1; // Bit 1: TMS (rising edge)
 
             // Switch to cJTAG two-wire mode
             pending_mode_select = 1;
 
-            // Debug logging for first 20 commands
-            static int oscan1_count = 0;
-            if (oscan1_count < 20) {
-                printf("[VPI] CMD_OSCAN1 #%d: tckc=%d, tmsc=%d\n", oscan1_count, tckc, tmsc);
-                oscan1_count++;
-            }
+            // Debug logging for all commands
+            DBG_PRINT(1, "[VPI] CMD_OSCAN1: buffer_out[0]=0x%02x → TMS=%d, TDI=%d, current_tdo=%d\n",
+                      vpi_cmd_rx.buffer_out[0], tms, tdi, current_tdo);
 
-            // In cJTAG mode, tckc parameter indicates whether to toggle TCKC
-            // tckc=1 means toggle TCKC (create one edge)
-            // tckc=0 means keep TCKC at current level (no edge)
-            if (tckc) {
-                pending_tckc_toggle = true;
-            }
+            // Initialize SF0 state machine for this operation
+            // Step 1: Rising edge with TMS bit
+            pending_tms = tms;
+            pending_tdi = 0;        // During rising edge, TDI is not active
+            pending_tckc_toggle = true;  // Create rising edge
+            sf0_state = JtagVpiServer::SF0_SEND_TMS;
+            sf0_tms = tms;
+            sf0_tdi = tdi;
+            sf0_tdo = 0;
 
-            // TMSC is the data bit
-            pending_tms = tmsc;
-            pending_tdi = tmsc;  // In SF0, TDI comes on falling edge
+            DBG_PRINT(1, "[VPI] CMD_OSCAN1: Initializing SF0 state machine (TMS=%d, TDI=%d)\n", tms, tdi);
 
-            // Prepare response with TDO on TMSC
+            // Prepare response packet - will be filled with TDO when complete
             memset(&vpi_cmd_tx, 0, sizeof(vpi_cmd_tx));
             host_to_le32(vpi_cmd_tx.cmd_buf, 5);
             host_to_le32(vpi_cmd_tx.length_buf, 1);
             host_to_le32(vpi_cmd_tx.nb_bits_buf, 2);
-            vpi_cmd_tx.buffer_in[0] = current_tdo & 1;  // TDO bit on TMSC
+            vpi_cmd_tx.buffer_in[0] = 0;  // Will be updated with TDO
 
             // Queue response
-            vpi_tx_pending = true;
+            vpi_tx_pending = false;  // Don't send yet - wait for SF0 to complete
             vpi_tx_bytes = 0;
             break;
         }
@@ -597,7 +577,50 @@ void JtagVpiServer::continue_vpi_work() {
         }
     }
 
-    // 2) Process TMS sequence (no response expected)
+    // 2) Process OScan1 SF0 state machine (two-phase TCKC/TMSC protocol)
+    if (sf0_state != SF0_IDLE) {
+        DBG_PRINT(2, "[VPI][DBG] SF0 state machine: state=%d, pending_tckc_toggle=%d, tckc_toggle_consumed=%d, current_tdo=%d\n",
+                  sf0_state, pending_tckc_toggle, tckc_toggle_consumed, current_tdo);
+
+        if (sf0_state == SF0_SEND_TMS) {
+            // Wait for rising edge to complete (pending_tckc_toggle to be consumed by get_pending_signals)
+            DBG_PRINT(2, "[VPI][DBG] SF0_SEND_TMS: pending=%d, consumed=%d\n", pending_tckc_toggle, tckc_toggle_consumed);
+            if (pending_tckc_toggle || !tckc_toggle_consumed) {
+                DBG_PRINT(2, "[VPI][DBG] SF0_SEND_TMS: Waiting for rising edge to complete\n");
+                return;  // Still waiting for toggle to be consumed
+            }
+            // Rising edge complete - now set up falling edge with TDI
+            DBG_PRINT(1, "[VPI][DBG] SF0_SEND_TMS: Rising edge complete, setting up falling edge\n");
+            pending_tdi = sf0_tdi;
+            pending_tms = 0;      // TMS only on rising edge
+            pending_tckc_toggle = true;  // Create falling edge
+            tckc_toggle_consumed = false;  // Reset the consumed flag
+            sf0_state = SF0_SEND_TDI;
+            return;  // Let simulation execute the falling edge
+        } else if (sf0_state == SF0_SEND_TDI) {
+            // Wait for falling edge to complete (pending_tckc_toggle to be consumed by get_pending_signals)
+            DBG_PRINT(2, "[VPI][DBG] SF0_SEND_TDI: pending=%d, consumed=%d\n", pending_tckc_toggle, tckc_toggle_consumed);
+            if (pending_tckc_toggle || !tckc_toggle_consumed) {
+                DBG_PRINT(2, "[VPI][DBG] SF0_SEND_TDI: Waiting for falling edge to complete\n");
+                return;  // Still waiting for toggle to be consumed
+            }
+            // Both edges complete - capture TDO and queue response
+            DBG_PRINT(1, "[VPI][DBG] SF0_SEND_TDI: Falling edge complete, capturing TDO=%d\n", current_tdo);
+            sf0_tdo = current_tdo & 1;
+
+            // Update response with captured TDO
+            vpi_cmd_tx.buffer_in[0] = sf0_tdo;
+            DBG_PRINT(1, "[VPI][DBG] SF0 SF0_SEND_TDI: Queueing response with TDO=0x%02x\n", sf0_tdo);
+
+            // Queue response for transmission
+            vpi_tx_pending = true;
+            vpi_tx_bytes = 0;
+            sf0_state = SF0_IDLE;
+            return;  // Response will be sent in next poll
+        }
+    }
+
+    // 3) Process TMS sequence (no response expected)
     if (tms_seq_active) {
         if (pending_tck_pulse) return; // wait for pulse to complete
         if (tms_seq_bit_index < tms_seq_num_bits) {
@@ -613,7 +636,7 @@ void JtagVpiServer::continue_vpi_work() {
         return;
     }
 
-    // 3) If legacy scan state machine is active, let it progress
+    // 4) If legacy scan state machine is active, let it progress
     // FIXME BUG FIX: Also handle SCAN_RECEIVING states (not just PROCESSING/SENDING)
     if (scan_state != SCAN_IDLE) {
         DBG_PRINT(2, "[VPI][DBG] continue_vpi_work: scan_state=%d (1=RX_TMS, 2=RX_TDI, 3=PROC, 4=SEND)\n", scan_state);
@@ -1033,18 +1056,30 @@ bool JtagVpiServer::get_pending_signals(uint8_t* tms, uint8_t* tdi, uint8_t* mod
         return true;
     }
 
-    if (!pending_tck_pulse && !pending_tckc_toggle && pending_mode_select == current_mode) {
+    // Check if there's any pending signal change
+    bool has_signal_change = (pending_tck_pulse || pending_tckc_toggle);
+    bool has_mode_change = (pending_mode_select != current_mode);
+
+    if (!has_signal_change && !has_mode_change) {
         return false;
     }
 
     *tms = pending_tms;
     *tdi = pending_tdi;
-    *mode_sel = pending_mode_select;
+    *mode_sel = pending_mode_select;  // Always return current mode setting
     *tck_pulse = pending_tck_pulse;
     if (tckc_toggle) *tckc_toggle = pending_tckc_toggle;
 
     pending_tck_pulse = false;
+    if (pending_tckc_toggle) {
+        tckc_toggle_consumed = true;  // Mark that we just consumed a TCKC toggle
+    }
     pending_tckc_toggle = false;
 
     return true;
+}
+
+void JtagVpiServer::set_mode(uint8_t mode) {
+    pending_mode_select = mode;
+    DBG_PRINT(1, "[VPI] Initial mode set to: %s\n", mode ? "cJTAG" : "JTAG");
 }

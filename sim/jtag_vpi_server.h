@@ -24,6 +24,7 @@ public:
     void update_signals(uint8_t tdo, uint32_t idcode, uint8_t mode);
     void update_signals(uint8_t tdo, uint8_t tdo_en, uint32_t idcode, uint8_t mode);
     bool get_pending_signals(uint8_t* tms, uint8_t* tdi, uint8_t* mode_sel, bool* tck_pulse, bool* tckc_toggle = nullptr);
+    void set_mode(uint8_t mode);  // Set initial mode from command-line
     bool is_client_connected() const { return client_sock >= 0; }
     void set_msb_first(bool v) { msb_first = v; }
     void set_protocol_mode(ProtocolMode m) { protocol_mode = m; }
@@ -79,6 +80,19 @@ private:
     // cJTAG/OScan1 state
     uint8_t tckc_state;            // Current TCKC level (0 or 1)
     bool pending_tckc_toggle;      // Toggle TCKC for next cycle
+    bool tckc_toggle_consumed;     // Flag set when pending_tckc_toggle was read by get_pending_signals()
+
+    // OScan1 SF0 state machine
+    enum SF0State {
+        SF0_IDLE,
+        SF0_SEND_TMS,    // Rising edge: send TMS on TMSC
+        SF0_SEND_TDI,    // Falling edge: send TDI on TMSC
+        SF0_CAPTURE_TDO  // Capture TDO after both edges complete
+    };
+    SF0State sf0_state = SF0_IDLE;
+    uint8_t sf0_tms;    // TMS bit to send on rising edge
+    uint8_t sf0_tdi;    // TDI bit to send on falling edge
+    uint8_t sf0_tdo;    // TDO bit captured
 
     // TCK pulse queue for operations that need multiple cycles (like RESET)
     struct TckOp {
