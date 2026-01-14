@@ -88,6 +88,76 @@ Production-ready SystemVerilog implementation of IEEE 1149.1 JTAG and IEEE 1149.
 └── Makefile                       # Build system
 ```
 
+## Prerequisites
+
+### Required Tools
+
+The following tools are required to build and test the project:
+
+**Core Requirements:**
+- **Verilator** (v5.0 or later) - SystemVerilog HDL simulator
+- **GCC/G++** - C/C++ compiler with C++14 support
+- **Make** - Build automation tool
+- **Telnet** - Required for OpenOCD integration tests
+
+**Testing & Debug:**
+- **OpenOCD** (optional) - For integration testing with JTAG/cJTAG
+- **lsof** - Network port monitoring (usually pre-installed)
+- **netcat** - Network utilities (optional, for diagnostics)
+
+**Optional Tools:**
+- **GTKWave** - FST/VCD waveform viewer for signal analysis
+- **OSS CAD Suite** - For synthesis (includes Yosys, ABC, etc.)
+
+### Installation
+
+**macOS:**
+```bash
+# Core requirements
+brew install verilator
+
+# Optional tools
+brew install gtkwave telnet
+brew install --cask oss-cad-suite
+```
+
+**Ubuntu/Debian:**
+```bash
+# Core requirements
+sudo apt-get update
+sudo apt-get install verilator build-essential telnet
+
+# Optional tools
+sudo apt-get install gtkwave lsof netcat-openbsd
+```
+
+**Fedora/RHEL:**
+```bash
+# Core requirements
+sudo dnf install verilator gcc-c++ make telnet
+
+# Optional tools
+sudo dnf install gtkwave lsof nmap-ncat
+```
+
+### Verify Installation
+
+```bash
+# Check Verilator version (should be 5.x or later)
+verilator --version
+
+# Check compiler
+gcc --version
+g++ --version
+
+# Check telnet
+which telnet
+
+# Check optional tools
+gtkwave --version  # Optional
+openocd --version  # Optional
+```
+
 ## Quick Start
 
 ### System Integration (JTAG + Debug Module + OScan1)
@@ -120,19 +190,6 @@ make vpi-sim         # Build and run VPI server (port 3333)
 # In another terminal:
 make client
 ./build/jtag_vpi_client
-```
-- **GTKWave** (optional, for waveform viewing)
-
-### Installation
-
-**macOS:**
-```bash
-brew install verilator gtkwave
-```
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get install verilator gtkwave build-essential
 ```
 
 ## Build & Run
@@ -570,7 +627,6 @@ The project uses a **two-layer testing approach** to balance speed, simplicity, 
 - ✅ **VPI Packet Parsing**: FIXED - Full 1036-byte OpenOCD packets now correctly handled
 
 **See Also:**
-- [FIX_SUMMARY.md](FIX_SUMMARY.md) - Recent VPI packet parsing fix
 - [Makefile](Makefile) (lines 377-382) - Developer documentation
 - [openocd/test_openocd.sh](openocd/test_openocd.sh) - Runtime notes
 - [docs/PROTOCOL_TEST_COMPARISON.md](docs/PROTOCOL_TEST_COMPARISON.md) - Complete test matrix
@@ -708,7 +764,6 @@ For issues or questions:
   - Fixed: Removed premature minimal mode detection on 8-byte headers
   - Result: cJTAG IR/DR scans now return correct data (was returning zeros)
   - Test status: JTAG 19/19 ✓, cJTAG 15/15 ✓, Core testbench all pass ✓
-  - See [FIX_SUMMARY.md](FIX_SUMMARY.md) for technical details
 - **Enhanced Protocol Testing**
   - Added combo protocol switching tests (6 tests)
   - Comprehensive validation of JTAG ⇄ Legacy protocol transitions

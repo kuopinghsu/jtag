@@ -42,8 +42,13 @@ GCC_CFLAGS := -Wall -O2
 # Timeouts (seconds) - configurable via environment
 # Example: make SIM_TIMEOUT=1 vpi-sim
 #          make TEST_TIMEOUT=20 test-jtag
+# Special: Set to 0 for unlimited timeout (passes --timeout 0 to executable)
 SIM_TIMEOUT ?= 10
 TEST_TIMEOUT ?= 60
+
+# Timeout option construction (always pass --timeout flag, 0 = unlimited)
+SIM_TIMEOUT_OPT := --timeout $(SIM_TIMEOUT)
+TEST_TIMEOUT_OPT := --timeout $(TEST_TIMEOUT)
 
 # Waveform tracing flag for runtime (--trace) [default: disabled]
 # Usage: make DUMP_FST=1 vpi-sim     (enable tracing)
@@ -90,8 +95,8 @@ help:
 	@echo "  make synth                      (ASAP7 synthesis)"
 	@echo ""
 	@echo "Configurable timeouts:"
-	@echo "  SIM_TIMEOUT   (default: $(SIM_TIMEOUT)s) for vpi-sim targets"
-	@echo "  TEST_TIMEOUT  (default: $(TEST_TIMEOUT)s) for test-* targets"
+	@echo "  SIM_TIMEOUT   (default: $(SIM_TIMEOUT)s, 0=unlimited) for vpi-sim targets"
+	@echo "  TEST_TIMEOUT  (default: $(TEST_TIMEOUT)s, 0=unlimited) for test-* targets"
 	@echo ""
 	@echo "Configurable options:"
 	@echo "  DUMP_FST      (0|1, default: $(DUMP_FST)) - Enable FST waveform tracing"
@@ -246,33 +251,33 @@ vpi-sim-openocd: $(BUILD_DIR)/jtag_vpi
 	@echo "=== Starting JTAG VPI Simulation (OpenOCD Protocol) ==="
 	@echo "Protocol: OpenOCD jtag_vpi (1036-byte packets)"
 	@echo "Port: 3333"
-	@echo "Timeout: $(SIM_TIMEOUT)s"
+	@echo "Timeout: $(if $(filter 0,$(SIM_TIMEOUT)),unlimited,$(SIM_TIMEOUT)s)"
 	@echo "Trace: $(TRACE_STATE)"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(SIM_TIMEOUT) --proto=openocd
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(SIM_TIMEOUT_OPT) --proto=openocd
 
 vpi-sim-legacy: $(BUILD_DIR)/jtag_vpi
 	@echo ""
 	@echo "=== Starting JTAG VPI Simulation (Legacy Protocol) ==="
 	@echo "Protocol: Legacy 8-byte header"
 	@echo "Port: 3333"
-	@echo "Timeout: $(SIM_TIMEOUT)s"
+	@echo "Timeout: $(if $(filter 0,$(SIM_TIMEOUT)),unlimited,$(SIM_TIMEOUT)s)"
 	@echo "Trace: $(TRACE_STATE)"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(SIM_TIMEOUT) --proto=legacy
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(SIM_TIMEOUT_OPT) --proto=legacy
 
 vpi-sim-auto: $(BUILD_DIR)/jtag_vpi
 	@echo ""
 	@echo "=== Starting JTAG VPI Simulation (Auto-Detect Protocol) ==="
 	@echo "Protocol: Auto-detected at connection time"
 	@echo "Port: 3333"
-	@echo "Timeout: $(SIM_TIMEOUT)s"
+	@echo "Timeout: $(if $(filter 0,$(SIM_TIMEOUT)),unlimited,$(SIM_TIMEOUT)s)"
 	@echo "Trace: $(TRACE_STATE)"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(SIM_TIMEOUT) --proto=auto
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(SIM_TIMEOUT_OPT) --proto=auto
 
 # Interactive VPI simulation target (runs foreground, auto-detect protocol)
 vpi-sim: vpi-sim-auto
@@ -285,7 +290,7 @@ test-vpi: $(BUILD_DIR)/jtag_vpi client
 	@pkill -9 jtag_vpi 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in background..."
-	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) > vpi_sim.log 2>&1 & \
+	@$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(TEST_TIMEOUT_OPT) > vpi_sim.log 2>&1 & \
 		SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \
 		sleep 2; \
@@ -311,14 +316,17 @@ test-vpi: $(BUILD_DIR)/jtag_vpi client
 test-jtag: $(BUILD_DIR)/jtag_vpi
 	@echo ""
 	@echo "=== Automated OpenOCD JTAG Mode Test ==="
-	@echo "Cleaning up any previous VPI servers..."
+	@echo "Cleaning up any previous VPI servers and OpenOCD instances..."
 	@pkill -9 jtag_vpi openocd 2>/dev/null || true
+	@# Kill any process using port 3333 or 4444
+	@lsof -ti:3333 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+	@lsof -ti:4444 2>/dev/null | xargs -r kill -9 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in JTAG mode..."
 	@if [ "$(DEBUG)" != "0" ] && [ -n "$(DEBUG)" ]; then \
-		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) 2>&1 | tee vpi_jtag.log & \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(TEST_TIMEOUT_OPT) 2>&1 | tee vpi_jtag.log & \
 	else \
-		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) > vpi_jtag.log 2>&1 & \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(TEST_TIMEOUT_OPT) > vpi_jtag.log 2>&1 & \
 	fi; \
 	SERVER_PID=$$!; \
 	echo "VPI server PID: $$SERVER_PID"; \
@@ -355,14 +363,17 @@ test-jtag: $(BUILD_DIR)/jtag_vpi
 test-cjtag: $(BUILD_DIR)/jtag_vpi
 	@echo ""
 	@echo "=== Automated OpenOCD cJTAG Mode Test ==="
-	@echo "Cleaning up any previous VPI servers..."
+	@echo "Cleaning up any previous VPI servers and OpenOCD instances..."
 	@pkill -9 jtag_vpi openocd 2>/dev/null || true
+	@# Kill any process using port 3333 or 4444
+	@lsof -ti:3333 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+	@lsof -ti:4444 2>/dev/null | xargs -r kill -9 2>/dev/null || true
 	@sleep 1
 	@echo "Starting VPI server in cJTAG mode..."
 	@if [ "$(DEBUG)" != "0" ] && [ -n "$(DEBUG)" ]; then \
-		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) --cjtag 2>&1 | tee vpi_cjtag.log & \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(TEST_TIMEOUT_OPT) --cjtag 2>&1 | tee vpi_cjtag.log & \
 	else \
-		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) --cjtag > vpi_cjtag.log 2>&1 & \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(TEST_TIMEOUT_OPT) --cjtag > vpi_cjtag.log 2>&1 & \
 	fi; \
 	SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \
@@ -410,9 +421,9 @@ test-legacy: $(BUILD_DIR)/jtag_vpi
 	@sleep 1
 	@echo "Starting VPI server in legacy protocol mode..."
 	@if [ "$(DEBUG)" != "0" ] && [ -n "$(DEBUG)" ]; then \
-		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) --proto=legacy 2>&1 | tee vpi_legacy.log & \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(TEST_TIMEOUT_OPT) --proto=legacy 2>&1 | tee vpi_legacy.log & \
 	else \
-		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) --timeout $(TEST_TIMEOUT) --proto=legacy > vpi_legacy.log 2>&1 & \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(TEST_TIMEOUT_OPT) --proto=legacy > vpi_legacy.log 2>&1 & \
 	fi; \
 	SERVER_PID=$$!; \
 		echo "VPI server PID: $$SERVER_PID"; \

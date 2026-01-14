@@ -79,7 +79,6 @@ if (vpi_rx_bytes < VPI_PKT_SIZE) {  // VPI_PKT_SIZE = 1036
 ### Impact
 - **Before**: cJTAG appeared broken, IR reads returned 0x00
 - **After**: cJTAG fully functional, IR reads return correct values (0x01, 0x10, 0x11)
-- **Documentation**: Created [FIX_SUMMARY.md](FIX_SUMMARY.md) with technical deep-dive
 
 ## What I Learned
 
@@ -345,8 +344,7 @@ Perfect for:
 ### Documentation
 - 📖 [README.md](README.md) - Main project documentation
 - 🚀 [QUICKSTART.md](QUICKSTART.md) - 5-minute quick start
-- 🐛 [FIX_SUMMARY.md](FIX_SUMMARY.md) - VPI bug fix details
-- 📊 [PROTOCOL_TEST_COMPARISON.md](docs/PROTOCOL_TEST_COMPARISON.md) - Test suite comparison
+-  [PROTOCOL_TEST_COMPARISON.md](docs/PROTOCOL_TEST_COMPARISON.md) - Test suite comparison
 - 📝 [OPENOCD_VPI_TECHNICAL_GUIDE.md](docs/OPENOCD_VPI_TECHNICAL_GUIDE.md) - VPI protocol deep-dive
 
 ### Standards References

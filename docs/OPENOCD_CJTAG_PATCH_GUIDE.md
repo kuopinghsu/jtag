@@ -4,17 +4,28 @@ This document describes what is needed to add IEEE 1149.7 cJTAG support to OpenO
 
 ## Quick Start
 
-To apply patches to your OpenOCD installation:
+⚠️ **Important**: The unified patch may not apply directly to your OpenOCD version. Use the automated script method:
 
 ```bash
+# Method 1: Automated Script (Recommended)
+cd /path/to/jtag/openocd/patched
+./apply_patches.sh
+# Then follow steps 5-8 in MANUAL_APPLICATION_GUIDE.md
+
+# Method 2: Try Unified Patch (May Fail)
 cd ~/openocd
 patch -p1 < /path/to/jtag/openocd/patched/001-jtag_vpi-cjtag-support.patch
+# If this fails, use Method 1
+
+# Create source files
 cat /path/to/jtag/openocd/patched/002-oscan1-new-file.txt > src/jtag/drivers/oscan1.c
 cat /path/to/jtag/openocd/patched/003-oscan1-header-new-file.txt > src/jtag/drivers/oscan1.h
+
+# Build
 ./configure --enable-jtag_vpi && make clean && make -j4 && sudo make install
 ```
 
-See [openocd/patched/README.md](../openocd/patched/README.md) for detailed application instructions.
+See [openocd/patched/MANUAL_APPLICATION_GUIDE.md](../openocd/patched/MANUAL_APPLICATION_GUIDE.md) for detailed manual instructions.
 
 ## Current Status
 
@@ -50,7 +61,7 @@ make test-jtag   # ✓ PASSES - 19/19 tests
 make test-cjtag  # ✓ PASSES - 15/15 tests (FIXED in v2.1)
 ```
 
-**What Changed**: VPI server packet parsing was fixed to wait for full 1036-byte OpenOCD VPI packets instead of treating 8-byte headers as complete. This resolved the "IR/DR scans returning zeros" issue. See [../FIX_SUMMARY.md](../FIX_SUMMARY.md) for details.
+**What Changed**: VPI server packet parsing was fixed to wait for full 1036-byte OpenOCD VPI packets instead of treating 8-byte headers as complete. This resolved the "IR/DR scans returning zeros" issue (v2.1 fix).
 
 With optional patches applied (enhanced features):
 ```bash

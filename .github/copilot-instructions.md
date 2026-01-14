@@ -1,6 +1,7 @@
 # Copilot Instructions for JTAG/cJTAG Project
 
 - Purpose: SystemVerilog IEEE 1149.1 JTAG + IEEE 1149.7 cJTAG (OScan1) with RISC-V DTM/DM integration, Verilator simulation, and OpenOCD VPI bridge.
+- Prerequisites: Verilator 5.x+, GCC/G++, Make, Telnet (for test-jtag/test-cjtag). Optional: GTKWave, OpenOCD, lsof. See [README.md](../README.md) Prerequisites section.
 - Start reading: [src/jtag/jtag_top.sv](../src/jtag/jtag_top.sv), [src/jtag/jtag_tap_controller.sv](../src/jtag/jtag_tap_controller.sv), [src/jtag/oscan1_controller.sv](../src/jtag/oscan1_controller.sv), [src/dbg/riscv_debug_module.sv](../src/dbg/riscv_debug_module.sv), [sim/jtag_vpi_server.cpp](../sim/jtag_vpi_server.cpp), [tb/jtag_tb.sv](../tb/jtag_tb.sv).
 - Architecture: JTAG/cJTAG core in `src/jtag`, RISC-V debug in `src/dbg`, integrated example in [src/system_top.sv](../src/system_top.sv). VPI wrapper [sim/jtag_vpi_top.sv](../sim/jtag_vpi_top.sv) exposes DUT to TCP server [sim/jtag_vpi_server.cpp](../sim/jtag_vpi_server.cpp) on port 3333; C/C++ clients live in [vpi/](../vpi).
 - Build/test (Verilator):
@@ -10,13 +11,21 @@
 - VPI interactive runs:
   - `make vpi-sim` (auto protocol detect) or `make vpi-sim-openocd` / `make vpi-sim-legacy` to force mode; server listens on 3333.
   - `make client` builds `build/jtag_vpi_advanced`; `make vpi` builds simple client.
-  - Flags: `DUMP_FST=1` enables runtime tracing; `ENABLE_FST=1` builds trace support; `DEBUG=1|2` increases VPI logs; `SIM_TIMEOUT`/`TEST_TIMEOUT` seconds.
+  - Flags: `DUMP_FST=1` enables runtime tracing; `ENABLE_FST=1` builds trace support; `DEBUG=1|2` increases VPI logs.
+  - Timeout: Default = 0 (unlimited, no timeout). Override with `--timeout <seconds>` parameter (0 = unlimited, >0 = timeout in seconds). Configured in sim/sim_vpi_main.cpp DEFAULT_TIMEOUT_SECONDS.
   - VPI debug levels: `DEBUG=1 make vpi-sim` shows concise server activity (connections, protocol detects); `DEBUG=2 make vpi-sim` adds verbose per-scan logging—useful when chasing OpenOCD packet handling.
 - OpenOCD integration:
   - Configs in [openocd/jtag.cfg](../openocd/jtag.cfg) and [openocd/cjtag.cfg](../openocd/cjtag.cfg).
-  - `make test-jtag` runs end-to-end OpenOCD JTAG flow (reads IDCODE 0x1DEAD3FF) - 19/19 tests passing.
-  - `make test-cjtag` runs end-to-end OpenOCD cJTAG flow - 15/15 tests passing (fixed in v2.1).
+  - `make test-jtag` runs end-to-end OpenOCD JTAG flow (reads IDCODE 0x1DEAD3FF) - 19/19 tests passing. Auto-cleans ports 3333/4444.
+  - `make test-cjtag` runs end-to-end OpenOCD cJTAG flow - 15/15 tests passing (fixed in v2.1). Auto-cleans ports 3333/4444.
+  - Both test targets now kill stale processes on ports 3333 (VPI) and 4444 (OpenOCD telnet) before starting.
   - For real cJTAG, apply patches in [openocd/patched](../openocd/patched) per [docs/OPENOCD_CJTAG_PATCH_GUIDE.md](../docs/OPENOCD_CJTAG_PATCH_GUIDE.md).
+- OpenOCD TCL test suite (65 tests across 4 protocol areas):
+  - Architecture: Single entry point [openocd/test_all.tcl](../openocd/test_all.tcl) sources individual test files based on TEST_MODE parameter (jtag|dmi|cjtag|stress|all).
+  - Run via: `./openocd/run_openocd_tests.sh <mode>` or `openocd -f openocd/jtag.cfg -c "set TEST_MODE jtag; source openocd/test_all.tcl"`.
+  - Test files: [test_jtag_basic.tcl](../openocd/test_jtag_basic.tcl) (12 tests), [test_dmi_debug.tcl](../openocd/test_dmi_debug.tcl) (20 tests), [test_cjtag_protocol.tcl](../openocd/test_cjtag_protocol.tcl) (18 tests), [test_stress.tcl](../openocd/test_stress.tcl) (15 tests).
+  - Individual test files have NO shutdown command; only test_all.tcl has shutdown at end.
+  - Documentation: [openocd/TCL_TESTS.md](../openocd/TCL_TESTS.md) for detailed test descriptions, [OPENOCD_TCL_SUITE_SUMMARY.md](../OPENOCD_TCL_SUITE_SUMMARY.md) for architecture overview.
 - RTL conventions:
   - cJTAG OScan1 controller handles OAC, JScan, zero insertion/deletion, CRC-8 (x^8 + x^2 + x + 1) with parity; see [docs/OSCAN1_IMPLEMENTATION.md](../docs/OSCAN1_IMPLEMENTATION.md).
   - Multi-TAP support up to 8 TAPs; IR length configurable per TAP; details in [docs/MULTI_TAP_SCAN_CHAIN.md](../docs/MULTI_TAP_SCAN_CHAIN.md).
@@ -25,9 +34,16 @@
   - OSS CAD Suite + ASAP7; run `make synth` or module-specific `make synth-jtag`, `make synth-dbg`, `make synth-system`; scripts in [syn/scripts](../syn/scripts).
   - Outputs under `syn/results/`, reports under `syn/reports/`; clean with `make synth-clean`.
 - Testing expectations (QuickStart): `make sim` should pass 5 tests (TAP reset, IDCODE JTAG/cJTAG, debug request, mode switch). VPI/OpenOCD integration: `make test-jtag` passes 19/19, `make test-cjtag` passes 15/15 (as of v2.1).
-- Recent fixes (v2.1 - 2026-01-12): VPI server packet parsing fixed to handle full 1036-byte OpenOCD VPI packets; cJTAG IR/DR scans now return correct data. See [FIX_SUMMARY.md](../FIX_SUMMARY.md).
+- Recent fixes (v2.1 - 2026-01-12): VPI server packet parsing fixed to handle full 1036-byte OpenOCD VPI packets; cJTAG IR/DR scans now return correct data.
+- Recent enhancements (2026-01-13):
+  - Fixed compilation warnings in VPI clients (vpi/jtag_vpi_client.c, vpi/jtag_vpi_advanced.cpp) using union-based IDCODE reading pattern.
+  - Enhanced test-jtag/test-cjtag Makefile targets with port cleanup (lsof-based kill for ports 3333/4444) to prevent stale process issues.
+  - Fixed test_openocd.sh arithmetic bug: changed `((PASS_COUNT++))` to `PASS_COUNT=$((PASS_COUNT + 1))` to avoid set -e failures.
+  - Added comprehensive Prerequisites section to README.md listing all required tools (Verilator, telnet, etc.).
 - Known pitfalls:
   - `jtag_vpi_client.c` uses legacy 4-byte protocol; OpenOCD uses 1036-byte packets—do not expect compatibility.
   - Waveform tracing disabled by default; use `DUMP_FST=1` and optionally `ENABLE_FST=1` when building.
+  - When fixing compiler warnings, preserve protocol behavior; use union pattern for type-safe reinterpretation (see vpi/jtag_vpi_client.c).
+  - In Bash scripts with `set -e`, use `VAR=$((VAR + 1))` not `((VAR++))` for arithmetic; latter returns pre-increment value causing premature exit.
 - Useful docs: [README.md](../README.md) for features/commands, [QUICKSTART.md](../QUICKSTART.md) for expected outputs, [docs/PROTOCOL_TESTING.md](../docs/PROTOCOL_TESTING.md) if present, [docs/OPENOCD_VPI_TECHNICAL_GUIDE.md](../docs/OPENOCD_VPI_TECHNICAL_GUIDE.md) for protocol details.
 - File hygiene: RTL uses SystemVerilog; keep ASCII; follow existing module/interface naming. Avoid reverting user changes; prefer `make clean` before rebuild.

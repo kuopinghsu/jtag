@@ -53,7 +53,7 @@ struct OcdVpiCmd {
 } __attribute__((packed));
 ```
 
-**Critical Implementation Detail**: The VPI server MUST wait for all 1036 bytes before processing. Early versions incorrectly treated 8-byte headers as complete packets, causing scan operations to return zeros. This was fixed in v2.1 (see [FIX_SUMMARY.md](../FIX_SUMMARY.md)).
+**Critical Implementation Detail**: The VPI server MUST wait for all 1036 bytes before processing. Early versions incorrectly treated 8-byte headers as complete packets, causing scan operations to return zeros. This was fixed in v2.1 (see [README.md Changelog](../README.md#changelog)).
 
 ### Command Structure (8 bytes)
 ```c
@@ -542,7 +542,7 @@ make test-jtag
 - Test Command: `make test-cjtag` passes 15/15 tests
 
 **Recent Fix (v2.1 - 2026-01-12)**:
-VPI server packet parsing was corrected to wait for complete 1036-byte OpenOCD VPI packets instead of treating 8-byte headers as complete. This resolved the "IR/DR scans returning zeros" issue that prevented cJTAG operation. See [FIX_SUMMARY.md](../FIX_SUMMARY.md) for technical details.
+VPI server packet parsing was corrected to wait for complete 1036-byte OpenOCD VPI packets instead of treating 8-byte headers as complete. This resolved the "IR/DR scans returning zeros" issue that prevented cJTAG operation.
 
 **What Works**:
 - ✅ Two-wire TCKC/TMSC operation

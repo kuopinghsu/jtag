@@ -10,7 +10,7 @@ This document describes how to test the actual JTAG and cJTAG protocol operation
 - Core JTAG Testbench: **All 12 tests PASSED**
 - VPI Packet Handling: **FIXED** - Full 1036-byte OpenOCD packets now correctly processed
 
-**Recent Fix**: The VPI server packet parsing issue has been resolved. The server now correctly waits for full 1036-byte OpenOCD VPI packets instead of treating 8-byte headers as complete packets. This fixed the "cJTAG IR/DR scans returning zeros" issue. See [../FIX_SUMMARY.md](../FIX_SUMMARY.md) for technical details.
+**Recent Fix**: The VPI server packet parsing issue has been resolved. The server now correctly waits for full 1036-byte OpenOCD VPI packets instead of treating 8-byte headers as complete packets. This fixed the "cJTAG IR/DR scans returning zeros" issue (v2.1 fix).
 
 ## Overview
 

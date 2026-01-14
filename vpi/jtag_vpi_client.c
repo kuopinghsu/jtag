@@ -93,10 +93,16 @@ int jtag_vpi_send_cmd(unsigned char cmd, unsigned char tms, unsigned char tdi, u
 
 /**
  * Read IDCODE
+ * Note: The response struct is 4 bytes, and we interpret it as uint32_t.
+ * This causes a compiler warning about array bounds, but it's actually correct
+ * for this protocol where the response encodes the IDCODE across all fields.
  */
 unsigned int jtag_read_idcode(void) {
     jtag_cmd_t cmd_pkt;
-    jtag_resp_t resp;
+    union {
+        jtag_resp_t resp;
+        unsigned int idcode;
+    } response;
 
     cmd_pkt.cmd = 0x02;  // Read IDCODE
     cmd_pkt.tms_val = 0;
@@ -108,12 +114,12 @@ unsigned int jtag_read_idcode(void) {
         return 0;
     }
 
-    if (recv(sock, &resp, sizeof(resp), 0) < 0) {
+    if (recv(sock, &response.resp, sizeof(response.resp), 0) < 0) {
         perror("recv");
         return 0;
     }
 
-    return *(unsigned int*)&resp.status;
+    return response.idcode;
 }
 
 /**

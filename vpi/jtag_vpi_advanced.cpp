@@ -127,9 +127,15 @@ public:
     }
 
     // Read IDCODE
+    // Note: The response struct is 4 bytes, and we interpret it as uint32_t.
+    // This causes a compiler warning about array bounds, but it's actually correct
+    // for this protocol where the response encodes the IDCODE across all fields.
     uint32_t read_idcode() {
         jtag_cmd_t cmd;
-        jtag_resp_t resp;
+        union {
+            jtag_resp_t resp;
+            uint32_t idcode;
+        } response;
 
         cmd.cmd = 0x02;
         cmd.tms_val = 0;
@@ -137,9 +143,9 @@ public:
         cmd.pad = 0;
 
         if (send(sock, &cmd, sizeof(cmd), 0) < 0) return 0;
-        if (recv(sock, &resp, sizeof(resp), 0) < 0) return 0;
+        if (recv(sock, &response.resp, sizeof(response.resp), 0) < 0) return 0;
 
-        return *(uint32_t*)&resp.status;
+        return response.idcode;
     }
 
     // Parse and display IDCODE

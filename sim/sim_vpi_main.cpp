@@ -18,9 +18,9 @@
 #include <cstring>
 #include <chrono>
 
-// Default timeout: 300 seconds = 30B cycles at 100MHz
-// Can be overridden with --timeout parameter
-#define DEFAULT_TIMEOUT_SECONDS 300
+// Default timeout: 0 = unlimited (no timeout)
+// Can be overridden with --timeout parameter (0 = unlimited, >0 = timeout in seconds)
+#define DEFAULT_TIMEOUT_SECONDS 0
 
 int main(int argc, char** argv) {
     // Create context
@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
             std::cout << "Options:" << std::endl;
             std::cout << "  --trace                  Enable FST waveform tracing" << std::endl;
             std::cout << "  --cjtag                  Enable cJTAG mode (default: JTAG)" << std::endl;
-            std::cout << "  --timeout <seconds>      Set simulation timeout (default: 300s)" << std::endl;
+            std::cout << "  --timeout <seconds>      Set simulation timeout (default: unlimited, 0=unlimited)" << std::endl;
             std::cout << "  --timeout=<seconds>      Alternative timeout format" << std::endl;
             std::cout << "  --quiet, -q              Suppress cycle status messages" << std::endl;
             std::cout << "  --verbose, -v            Show cycle status messages (default)" << std::endl;
@@ -118,9 +118,15 @@ int main(int argc, char** argv) {
 
     uint64_t max_cycles = timeout_seconds * 100000000ULL; // 100MHz clock (fallback)
     auto start_time = std::chrono::steady_clock::now();
-    auto deadline   = start_time + std::chrono::seconds(timeout_seconds);
+    auto deadline   = (timeout_seconds == 0) ?
+                      std::chrono::steady_clock::time_point::max() :
+                      start_time + std::chrono::seconds(timeout_seconds);
     std::cout << "[SIM] Mode: " << (cjtag_mode ? "cJTAG" : "JTAG") << std::endl;
-    std::cout << "[SIM] Timeout: " << timeout_seconds << "s (wall-clock) | fallback cycles: " << max_cycles << std::endl;
+    if (timeout_seconds == 0) {
+        std::cout << "[SIM] Timeout: unlimited" << std::endl;
+    } else {
+        std::cout << "[SIM] Timeout: " << timeout_seconds << "s (wall-clock) | fallback cycles: " << max_cycles << std::endl;
+    }
     std::cout << "[SIM] Bit order: " << (msb_first ? "MSB-first" : "LSB-first") << std::endl;
     std::cout << "[SIM] Protocol: " << (proto_mode) << std::endl;
 
@@ -338,10 +344,13 @@ int main(int argc, char** argv) {
         cycle_count++;
 
         // Exit condition: Ctrl+C or wall-clock timeout (with cycle fallback)
-        if (std::chrono::steady_clock::now() >= deadline || cycle_count > max_cycles) {
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
-            std::cout << "\n[SIM] Timeout reached (elapsed " << elapsed << "s, configured " << timeout_seconds << "s)" << std::endl;
-            break;
+        // Skip timeout check if timeout_seconds is 0 (unlimited)
+        if (timeout_seconds > 0) {
+            if (std::chrono::steady_clock::now() >= deadline || cycle_count > max_cycles) {
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
+                std::cout << "\n[SIM] Timeout reached (elapsed " << elapsed << "s, configured " << timeout_seconds << "s)" << std::endl;
+                break;
+            }
         }
     }
 

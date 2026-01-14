@@ -142,13 +142,13 @@ echo ""
 echo "Test 1: OpenOCD VPI Connection"
 if echo "$TEST_OUTPUT" | grep -q "Connection to.*successful"; then
     echo "  ✓ PASS: VPI adapter connected"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 elif grep -q "Connection to.*successful" "$LOG_FILE" 2>/dev/null; then
     echo "  ✓ PASS: VPI adapter connected"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 else
     echo "  ✗ FAIL: VPI connection issue"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 
 # Test 2: OpenOCD initialization
@@ -156,10 +156,10 @@ echo ""
 echo "Test 2: OpenOCD Initialization"
 if grep -q "OpenOCD initialized\|Listening on port" "$LOG_FILE" 2>/dev/null; then
     echo "  ✓ PASS: OpenOCD initialized successfully"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 else
     echo "  ✗ FAIL: OpenOCD initialization failed"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 
 # Test 3: JTAG interface
@@ -167,14 +167,14 @@ echo ""
 echo "Test 3: JTAG Interface Detection"
 if grep -q "interrogation failed\|scan chain\|TAP" "$LOG_FILE" 2>/dev/null; then
     echo "  ✓ PASS: JTAG interface detected"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 elif grep -q "riscv\|target" "$LOG_FILE" 2>/dev/null; then
     echo "  ✓ PASS: JTAG target found"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 else
     echo "  ⚠ WARNING: JTAG scan chain status unclear"
     # Don't fail, could be VPI limitation
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 fi
 
 # Test 4: Telnet interface responsive
@@ -182,13 +182,13 @@ echo ""
 echo "Test 4: Telnet Interface"
 if echo "$TEST_OUTPUT" | grep -q "Open On-Chip Debugger\|Listening\|help"; then
     echo "  ✓ PASS: Telnet interface responsive"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 elif [ -n "$TEST_OUTPUT" ]; then
     echo "  ⚠ PASS: Telnet connection established"
-    ((PASS_COUNT++))
+    PASS_COUNT=$((PASS_COUNT + 1))
 else
     echo "  ✗ FAIL: Telnet connection failed"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 
 # Summary
@@ -261,6 +261,10 @@ fi
 if [ "$MODE" == "cjtag" ]; then
     echo ""
     echo "=== cJTAG Protocol Testing ==="
+    echo "NOTE: This tests the VPI+RTL stack, NOT OpenOCD's cJTAG support."
+    echo "      Standard OpenOCD cannot generate OScan1 protocol sequences."
+    echo "      See openocd/README.md FAQ for details."
+    echo ""
 
     # Compile unified protocol test (cJTAG mode)
     CJTAG_TEST="$SCRIPT_DIR/test_protocol"
@@ -349,6 +353,30 @@ if [ "$MODE" == "jtag" ]; then
 elif [ "$MODE" == "cjtag" ]; then
     echo "cJTAG protocol:       $([ "${PROTOCOL_RESULT:-1}" -eq 0 ] && echo "PASS" || echo "FAIL")"
     echo "Legacy protocol:      $([ "${LEGACY_RESULT:-1}" -eq 0 ] && echo "PASS" || echo "FAIL")"
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║  IMPORTANT: Understanding cJTAG Test Results                  ║"
+    echo "╠═══════════════════════════════════════════════════════════════╣"
+    echo "║  These tests validate:                                        ║"
+    echo "║    ✓ VPI server can handle cJTAG-related commands             ║"
+    echo "║    ✓ RTL hardware OScan1 controller works correctly           ║"
+    echo "║    ✓ VPI+RTL stack ready for cJTAG communication              ║"
+    echo "║                                                               ║"
+    echo "║  These tests DO NOT validate:                                 ║"
+    echo "║    ✗ OpenOCD's ability to generate OScan1 sequences           ║"
+    echo "║    ✗ OpenOCD's cJTAG/IEEE 1149.7 support                      ║"
+    echo "║    ✗ End-to-end OpenOCD → cJTAG hardware communication        ║"
+    echo "║                                                               ║"
+    echo "║  Why: test_protocol.c bypasses OpenOCD and speaks VPI         ║"
+    echo "║       protocol directly, sending cJTAG commands that          ║"
+    echo "║       standard OpenOCD does not support.                      ║"
+    echo "║                                                               ║"
+    echo "║  To add OpenOCD cJTAG support:                                ║"
+    echo "║    See openocd/README.md FAQ section                          ║"
+    echo "║    Apply patches from openocd/patched/ directory              ║"
+    echo "║    Read docs/OPENOCD_CJTAG_PATCH_GUIDE.md                     ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo ""
 
     # In cJTAG mode, fail the run if any test fails (connectivity, protocol, or legacy)
     if [ $OPENOCD_RESULT -ne 0 ] || [ "${LEGACY_RESULT:-1}" -ne 0 ] || [ "${PROTOCOL_RESULT:-1}" -ne 0 ]; then
@@ -362,17 +390,20 @@ elif [ "$MODE" == "cjtag" ]; then
             echo "  ✗ Legacy protocol backward compatibility failed"
         fi
         if [ "${PROTOCOL_RESULT:-1}" -ne 0 ]; then
-            echo "  ✗ cJTAG protocol tests failed"
+            echo "  ✗ cJTAG protocol tests failed (VPI+RTL stack issue)"
         fi
         echo ""
-        echo "To support cJTAG, OpenOCD needs:"
-        echo "  • IEEE 1149.7 OScan1 protocol support"
-        echo "  • Two-wire TCKC/TMSC signaling"
-        echo "  • JScan command generation"
+        echo "Note: Standard OpenOCD does NOT support cJTAG/OScan1:"
+        echo "  • Missing IEEE 1149.7 OScan1 protocol layer"
+        echo "  • Cannot generate OAC sequences or JScan commands"
+        echo "  • Cannot handle SF0 scanning format or bit stuffing"
+        echo "  • Patches required for OpenOCD cJTAG support"
         RESULT=1
     else
         echo ""
         echo "✓ ALL TESTS PASSED"
+        echo "  (VPI server + RTL hardware stack validated)"
+        echo "  (Note: OpenOCD cJTAG support requires patches)"
         RESULT=0
     fi
 else
