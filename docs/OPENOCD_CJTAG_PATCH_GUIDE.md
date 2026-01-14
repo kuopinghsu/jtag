@@ -7,22 +7,17 @@ This document describes what is needed to add IEEE 1149.7 cJTAG support to OpenO
 ⚠️ **Important**: The unified patch may not apply directly to your OpenOCD version. Use the automated script method:
 
 ```bash
-# Method 1: Automated Script (Recommended)
-cd /path/to/jtag/openocd/patched
-./apply_patches.sh
-# Then follow steps 5-8 in MANUAL_APPLICATION_GUIDE.md
-
-# Method 2: Try Unified Patch (May Fail)
-cd ~/openocd
+# Try Unified Patch (May Fail)
+cd {OPENOCD_DIR}
 patch -p1 < /path/to/jtag/openocd/patched/001-jtag_vpi-cjtag-support.patch
-# If this fails, use Method 1
+# If this fails, use follow steps 1-10 in MANUAL_APPLICATION_GUIDE.md
 
 # Create source files
 cat /path/to/jtag/openocd/patched/002-oscan1-new-file.txt > src/jtag/drivers/oscan1.c
 cat /path/to/jtag/openocd/patched/003-oscan1-header-new-file.txt > src/jtag/drivers/oscan1.h
 
 # Build
-./configure --enable-jtag_vpi && make clean && make -j4 && sudo make install
+./configure --enable-jtag_vpi --enable-internal-jimtcl && make clean && make -j4 && sudo make install
 ```
 
 See [openocd/patched/MANUAL_APPLICATION_GUIDE.md](../openocd/patched/MANUAL_APPLICATION_GUIDE.md) for detailed manual instructions.
@@ -71,159 +66,17 @@ make test-cjtag  # ✓ PASSES - cJTAG with enhanced OScan1 commands
 
 **Patches provide**: Explicit JScan command generation, SF format selection, more granular control. Basic cJTAG operation works without patches.
 
-## Patch Contents
+## Patch Application
 
-All patch files are located in [openocd/patched/](../openocd/patched/):
+For detailed instructions on applying the OpenOCD cJTAG patches, see:
+- **[openocd/patched/MANUAL_APPLICATION_GUIDE.md](../openocd/patched/MANUAL_APPLICATION_GUIDE.md)** - Complete step-by-step manual application guide
 
-### 001-jtag_vpi-cjtag-support.patch
-Main driver modifications (unified diff format):
-- Adds `oscan1.h` include
-- Adds cJTAG mode state variables
-- Adds 4 support functions for two-wire communication
-- Adds 4 TCL command handlers
-- Integrates OScan1 initialization
-
-### 002-oscan1-new-file.txt
-New file: `src/jtag/drivers/oscan1.c` (~300 lines)
-- OAC (Attention Character) generation
-- JScan command encoding
-- Zero insertion/deletion (bit stuffing)
-- Scanning Format 0 (SF0) encoder/decoder
-- CRC-8 and parity calculation
-- Two-wire TCKC/TMSC interface
-
-### 003-oscan1-header-new-file.txt
-New file: `src/jtag/drivers/oscan1.h` (~100 lines)
-- Function declarations
-- Protocol constants
-- Data structure definitions
-
-## Detailed Implementation
-
-### jtag_vpi.c Changes
-The patch (001-jtag_vpi-cjtag-support.patch) makes the following additions:
-
-**1. Add oscan1.h Include**
-```c
-#include "oscan1.h"  // OScan1 protocol definitions
-```
-
-**2. Add cJTAG State Variables**
-```c
-static int jtag_vpi_cjtag_mode = 0;           // Mode flag
-static bool jtag_vpi_oscan1_initialized = false;  // Init flag
-```
-
-**3. Add Support Functions**
-```c
-// Two-wire communication
-static int jtag_vpi_send_tckc_tmsc(uint8_t tckc, uint8_t tmsc);
-static uint8_t jtag_vpi_receive_tmsc(void);
-
-// OScan1 initialization
-static int jtag_vpi_oscan1_init(void) {
-    oscan1_send_oac();                    // Send OAC
-    oscan1_send_jscan_cmd(JSCAN_OSCAN_ON); // Enable OScan1
-    oscan1_send_jscan_cmd(JSCAN_SELECT);  // Select device
-    jtag_vpi_oscan1_initialized = true;
-    return ERROR_OK;
-}
-
-// SF0 scanning
-static int jtag_vpi_sf0_scan(uint8_t tms, uint8_t tdi, uint8_t *tdo) {
-    oscan1_sf0_encode(tms, tdi);
-    *tdo = oscan1_sf0_receive_tdo();
-    return ERROR_OK;
-}
-```
-
-**4. Add TCL Command Handlers**
-```c
-// Enable cJTAG mode
-COMMAND_HANDLER(jtag_vpi_handle_enable_cjtag_command) { ... }
-
-// Set scanning format
-COMMAND_HANDLER(jtag_vpi_handle_scanning_format_command) { ... }
-
-// Enable CRC-8
-COMMAND_HANDLER(jtag_vpi_handle_enable_crc_command) { ... }
-
-// Enable parity
-COMMAND_HANDLER(jtag_vpi_handle_enable_parity_command) { ... }
-```
-
-**5. Register Commands**
-```c
-// Register in jtag_vpi_commands[] array:
-{
-    .name = "enable_cjtag",
-    .handler = jtag_vpi_handle_enable_cjtag_command,
-    ...
-}
-```
-
-### oscan1.c Implementation
-New file with OScan1 protocol layer (~300 lines):
-- OAC sequence generation (16 TCKC edges)
-- JScan command encoding
-- Zero insertion/deletion for bit stuffing
-- SF0 TMS/TDI encoding on two-wire TMSC
-- CRC-8 calculation
-- Parity checking
-
-### oscan1.h Header
-New file with public interface (~100 lines):
-- Function declarations
-- Protocol constants and commands
-- Data structure definitions
-
-### Makefile.am
-Add oscan1.c to build system:
-```makefile
-DRIVERFILES += %D%/oscan1.c
-```
-
-### Configuration Commands
-
-**TCL Interface** (available in OpenOCD after patching):
-```tcl
-# Enable cJTAG mode
-jtag_vpi enable_cjtag
-
-# Select scanning format (0, 1, 2, 3)
-jtag_vpi scanning_format 0
-
-# Enable CRC-8 checking
-jtag_vpi enable_crc on|off
-
-# Enable parity checking
-jtag_vpi enable_parity on|off
-```
-
-## Implementation Status
-
-### ✓ Complete (in patch files)
-- [x] OAC sequence generation
-- [x] JScan command encoding
-- [x] Zero insertion/deletion (bit stuffing)
-- [x] Scanning Format 0 (SF0) encoder/decoder
-- [x] CRC-8 calculation
-- [x] Even parity checking
-- [x] Two-wire TCKC/TMSC communication
-- [x] VPI integration
-- [x] TCL command interface
-
-### Integration Checklist
-- [ ] Backup original: `cp src/jtag/drivers/jtag_vpi.c{,.backup}`
-- [ ] Apply patch: `patch -p1 < 001-jtag_vpi-cjtag-support.patch`
-- [ ] Create oscan1.c: `cat 002-oscan1-new-file.txt > src/jtag/drivers/oscan1.c`
-- [ ] Create oscan1.h: `cat 003-oscan1-header-new-file.txt > src/jtag/drivers/oscan1.h`
-- [ ] Verify Makefile.am has `oscan1.c` in build
-- [ ] Configure: `./configure --enable-jtag_vpi`
-- [ ] Build: `make clean && make -j4`
-- [ ] Install: `sudo make install`
-- [ ] Test JTAG: `make test-jtag`  (should still pass)
-- [ ] Test cJTAG: `make test-cjtag` (should now pass)
+The manual guide provides:
+- Detailed patch file descriptions and contents
+- Step-by-step application instructions for each patch
+- Build system integration steps
+- Troubleshooting for common issues
+- Verification procedures
 
 ## Testing Strategy
 
@@ -375,31 +228,7 @@ All patches and reference implementations are in [openocd/patched/](../openocd/p
 - Developer guide: https://openocd.org/doc/doxygen/html/
 - Driver examples: https://github.com/openocd-org/openocd/tree/master/src/jtag/drivers
 
-## Building with Patches
 
-### Automatic Application
-The quickest way to apply patches:
-
-```bash
-cd ~/openocd
-
-# 1. Apply jtag_vpi.c patch
-patch -p1 < /path/to/jtag/openocd/patched/001-jtag_vpi-cjtag-support.patch
-
-# 2. Create oscan1.c
-cp /path/to/jtag/openocd/patched/002-oscan1-new-file.txt src/jtag/drivers/oscan1.c
-
-# 3. Create oscan1.h
-cp /path/to/jtag/openocd/patched/003-oscan1-header-new-file.txt src/jtag/drivers/oscan1.h
-
-# 4. Build
-./configure --enable-jtag_vpi
-make clean && make -j4
-sudo make install
-```
-
-### Manual Steps
-See [openocd/patched/README.md](../openocd/patched/README.md) for detailed step-by-step instructions.
 
 ## Troubleshooting
 
@@ -431,19 +260,11 @@ make 2>&1 | head -20
 ### Reverting Patches
 See [openocd/patched/README.md](../openocd/patched/README.md#reverting-patches) for revert instructions.
 
-## Getting Started with Patches
+## Getting Started
 
-1. **Review patch contents**: Open [openocd/patched/README.md](../openocd/patched/README.md)
-2. **Back up your OpenOCD**: `cp -r ~/openocd ~/openocd.backup`
-3. **Apply patches**: Follow quick start in [openocd/patched/README.md](../openocd/patched/README.md)
-4. **Build OpenOCD**: `./configure --enable-jtag_vpi && make clean && make -j4`
-5. **Install**: `sudo make install`
-6. **Test**: `make test-jtag && make test-cjtag`
-7. **Verify**: Both tests should pass with cJTAG protocol support
+For complete patch application instructions, see [openocd/patched/MANUAL_APPLICATION_GUIDE.md](../openocd/patched/MANUAL_APPLICATION_GUIDE.md).
 
-## Next Steps
-
-With patches applied and OpenOCD built:
+Once patches are applied and OpenOCD is built:
 - Both JTAG and cJTAG modes will work
 - Standard JTAG tests continue to pass (no regression)
 - cJTAG protocol tests will validate two-wire operation
