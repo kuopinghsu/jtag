@@ -9,8 +9,14 @@
 #ifndef ENABLE_FST
 #define ENABLE_FST 0
 #endif
+#ifndef ENABLE_VCD
+#define ENABLE_VCD 0
+#endif
 #if ENABLE_FST
 #include "verilated_fst_c.h"
+#endif
+#if ENABLE_VCD
+#include "verilated_vcd_c.h"
 #endif
 #include "jtag_vpi_server.h"
 #include <iostream>
@@ -55,8 +61,8 @@ int main(int argc, char** argv) {
 
     // Parse command line arguments
 
-#if ENABLE_FST
-    VerilatedFstC* trace = nullptr;
+#if ENABLE_FST || ENABLE_VCD
+    void* trace = nullptr;
 #endif
     bool trace_enabled = false;
     bool verbose = true;  // Default: show status messages
@@ -153,12 +159,20 @@ int main(int argc, char** argv) {
     if (trace_enabled) {
 #if ENABLE_FST
         contextp->traceEverOn(true);
-        trace = new VerilatedFstC;
-        top->trace(trace, 99);
-        trace->open("jtag_vpi.fst");
+        VerilatedFstC* fst_trace = new VerilatedFstC;
+        top->trace(fst_trace, 99);
+        fst_trace->open("jtag_vpi.fst");
+        trace = fst_trace;
         std::cout << "[TRACE] FST waveform enabled: jtag_vpi.fst" << std::endl;
+#elif ENABLE_VCD
+        contextp->traceEverOn(true);
+        VerilatedVcdC* vcd_trace = new VerilatedVcdC;
+        top->trace(vcd_trace, 99);
+        vcd_trace->open("jtag_vpi.vcd");
+        trace = vcd_trace;
+        std::cout << "[TRACE] VCD waveform enabled: jtag_vpi.vcd" << std::endl;
 #else
-        std::cout << "[TRACE] FST tracing requested but disabled at build-time (ENABLE_FST=0)" << std::endl;
+        std::cout << "[TRACE] Tracing requested but disabled at build-time (no waveform format enabled)" << std::endl;
 #endif
     }
 
@@ -167,12 +181,14 @@ int main(int argc, char** argv) {
     bool client_connected_once = false;
 
     // Release reset after a few cycles
-    for (int i = 0; i < 10; i++) {
-        top->clk = !top->clk;
+    for (int i = 0; i < 50; i++) {  // Use more cycles for proper clock generation
+        top->clk = (contextp->time() / 5) & 1;  // 50% duty cycle clock
         top->eval();
 
     #if ENABLE_FST
-        if (trace) trace->dump(contextp->time());
+        if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+    #elif ENABLE_VCD
+        if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
     #endif
         contextp->timeInc(1);
     }
@@ -185,18 +201,22 @@ int main(int argc, char** argv) {
     top->jtag_pin1_i = 1;  // TMS high
     for (int i = 0; i < 5; i++) {
         top->jtag_pin0_i = 1;  // TCK rising
-        top->clk = !top->clk;
+        top->clk = (contextp->time() / 5) & 1;  // Time-based 50% duty cycle
         top->eval();
     #if ENABLE_FST
-        if (trace) trace->dump(contextp->time());
+        if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+    #elif ENABLE_VCD
+        if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
     #endif
         contextp->timeInc(1);
 
         top->jtag_pin0_i = 0;  // TCK falling
-        top->clk = !top->clk;
+        top->clk = (contextp->time() / 5) & 1;  // Time-based 50% duty cycle
         top->eval();
     #if ENABLE_FST
-        if (trace) trace->dump(contextp->time());
+        if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+    #elif ENABLE_VCD
+        if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
     #endif
         contextp->timeInc(1);
     }
@@ -211,8 +231,9 @@ int main(int argc, char** argv) {
 
     // Main simulation loop
     while (!contextp->gotFinish()) {
-        // Toggle clock
-        top->clk = !top->clk;
+        // Generate 50% duty cycle clock based on simulation time
+        // Clock period = 10ns (100MHz), so toggle every 5ns
+        top->clk = (contextp->time() / 5) & 1;
 
         // On positive clock edge, poll VPI server
         if (top->clk && (cycle_count % 10) == 0) {
@@ -263,7 +284,9 @@ int main(int argc, char** argv) {
                     top->jtag_pin0_i = tckc_state;
                     top->eval();
 #if ENABLE_FST
-                    if (trace) trace->dump(contextp->time());
+                    if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+#elif ENABLE_VCD
+                    if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
 #endif
                     contextp->timeInc(1);
 
@@ -288,14 +311,18 @@ int main(int argc, char** argv) {
                     top->jtag_pin0_i = 1;
                     top->eval();
 #if ENABLE_FST
-                    if (trace) trace->dump(contextp->time());
+                    if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+#elif ENABLE_VCD
+                    if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
 #endif
                     contextp->timeInc(1);
 
                     top->jtag_pin0_i = 0;
                     top->eval();
 #if ENABLE_FST
-                    if (trace) trace->dump(contextp->time());
+                    if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+#elif ENABLE_VCD
+                    if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
 #endif
                     contextp->timeInc(1);
 
@@ -316,6 +343,43 @@ int main(int argc, char** argv) {
                         top->active_mode
                     );
                 }
+            } else if ((cycle_count % 1000) == 0) {
+                // No VPI client connected: generate automatic test pattern
+                // This makes pins toggle even during test-vpi so you can see activity in VCD
+                static int auto_test_state = 0;
+                static int auto_test_cycle = 0;
+
+                switch (auto_test_state) {
+                    case 0: // TAP Reset sequence (TMS high for several clocks)
+                        top->jtag_pin1_i = 1;  // TMS high
+                        top->jtag_pin2_i = 0;  // TDI low
+                        top->jtag_pin0_i = (auto_test_cycle & 1);  // Toggle TCK
+                        if (++auto_test_cycle >= 10) {
+                            auto_test_state = 1;
+                            auto_test_cycle = 0;
+                        }
+                        break;
+
+                    case 1: // Go to Run-Test/Idle (TMS low)
+                        top->jtag_pin1_i = 0;  // TMS low
+                        top->jtag_pin2_i = 0;  // TDI low
+                        top->jtag_pin0_i = (auto_test_cycle & 1);  // Toggle TCK
+                        if (++auto_test_cycle >= 4) {
+                            auto_test_state = 2;
+                            auto_test_cycle = 0;
+                        }
+                        break;
+
+                    case 2: // Generate scan-like patterns
+                        top->jtag_pin1_i = (auto_test_cycle >> 2) & 1;  // Slow TMS pattern
+                        top->jtag_pin2_i = auto_test_cycle & 1;         // Alternating TDI
+                        top->jtag_pin0_i = (auto_test_cycle >> 1) & 1;  // Medium TCK pattern
+                        if (++auto_test_cycle >= 32) {
+                            auto_test_state = 0;  // Loop back to start
+                            auto_test_cycle = 0;
+                        }
+                        break;
+                }
             }
 
             // Print status every 20000000 cycles (20M cycles = less frequent logging)
@@ -335,7 +399,11 @@ int main(int argc, char** argv) {
 
 #if ENABLE_FST
         if (trace) {
-            trace->dump(contextp->time());
+            static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+        }
+#elif ENABLE_VCD
+        if (trace) {
+            static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
         }
 #endif
 
@@ -358,8 +426,13 @@ int main(int argc, char** argv) {
 
 #if ENABLE_FST
     if (trace) {
-        trace->close();
-        delete trace;
+        static_cast<VerilatedFstC*>(trace)->close();
+        delete static_cast<VerilatedFstC*>(trace);
+    }
+#elif ENABLE_VCD
+    if (trace) {
+        static_cast<VerilatedVcdC*>(trace)->close();
+        delete static_cast<VerilatedVcdC*>(trace);
     }
 #endif
 

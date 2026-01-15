@@ -11,11 +11,12 @@
 - VPI interactive runs:
   - `make vpi-sim` (auto protocol detect) or `make vpi-sim-openocd` / `make vpi-sim-legacy` to force mode; server listens on 3333.
   - `make client` builds `build/jtag_vpi_advanced`; `make vpi` builds simple client.
-  - Control flags: `VERBOSE=1` enables SystemVerilog debug messages; `DEBUG=1|2` controls VPI server debug levels; `DUMP_FST=1` enables runtime tracing; `ENABLE_FST=1` builds trace support.
+  - Control flags: `VERBOSE=1` enables SystemVerilog debug messages; `DEBUG=1|2` controls VPI server debug levels; `WAVE=fst|vcd|1` enables waveform tracing (fst/vcd/fst-default); unset disables tracing.
   - Timeout: Default = 0 (unlimited, no timeout). Override with `--timeout <seconds>` parameter (0 = unlimited, >0 = timeout in seconds). Configured in sim/sim_vpi_main.cpp DEFAULT_TIMEOUT_SECONDS.
   - SystemVerilog debug: `VERBOSE=1 make sim` shows TAP state transitions, IR/DR operations, and protocol messages in simulation.
   - VPI debug levels: `DEBUG=1 make vpi-sim` shows concise server activity (connections, protocol detects); `DEBUG=2 make vpi-sim` adds verbose per-scan logging—useful when chasing OpenOCD packet handling.
   - Combined debug: `VERBOSE=1 DEBUG=2 make vpi-sim` enables both SystemVerilog and VPI server verbose output for comprehensive debugging.
+  - Waveform tracing: `WAVE=fst make sim` generates FST waveforms; `WAVE=vcd make sim` generates VCD waveforms; `WAVE=1 make sim` defaults to FST format. Unset WAVE for fastest simulation (no tracing).
 - OpenOCD integration:
   - Configs in [openocd/jtag.cfg](../openocd/jtag.cfg) and [openocd/cjtag.cfg](../openocd/cjtag.cfg).
   - `make test-jtag` runs end-to-end OpenOCD JTAG flow (reads IDCODE 0x1DEAD3FF) - 19/19 tests passing. Auto-cleans ports 3333/4444.
@@ -44,7 +45,7 @@
   - Added comprehensive Prerequisites section to README.md listing all required tools (Verilator, telnet, etc.).
 - Known pitfalls:
   - `jtag_vpi_client.c` uses legacy 4-byte protocol; OpenOCD uses 1036-byte packets—do not expect compatibility.
-  - Waveform tracing disabled by default; use `DUMP_FST=1` and optionally `ENABLE_FST=1` when building.
+  - Waveform tracing disabled by default; use `WAVE=fst` or `WAVE=vcd` to enable. `WAVE=1` defaults to FST format.
   - When fixing compiler warnings, preserve protocol behavior; use union pattern for type-safe reinterpretation (see vpi/jtag_vpi_client.c).
   - In Bash scripts with `set -e`, use `VAR=$((VAR + 1))` not `((VAR++))` for arithmetic; latter returns pre-increment value causing premature exit.
 - Useful docs: [README.md](../README.md) for features/commands, [QUICKSTART.md](../QUICKSTART.md) for expected outputs, [docs/PROTOCOL_TESTING.md](../docs/PROTOCOL_TESTING.md) if present, [docs/OPENOCD_VPI_TECHNICAL_GUIDE.md](../docs/OPENOCD_VPI_TECHNICAL_GUIDE.md) for protocol details.

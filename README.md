@@ -211,11 +211,20 @@ make sim
 
 **Output:**
 - Console: Test results
-- `jtag_sim.fst`: FST waveform file
+- Waveform file: `jtag_sim.fst` (FST format) or `jtag_sim.vcd` (VCD format), when tracing enabled
 
 **View waveforms:**
 ```bash
+# For FST files (default)
 gtkwave jtag_sim.fst
+
+# For VCD files
+gtkwave jtag_sim.vcd
+
+# Enable tracing with WAVE parameter
+WAVE=fst make sim    # Generate FST format
+WAVE=vcd make sim    # Generate VCD format
+WAVE=1 make sim      # Generate FST format (default)
 ```
 
 ### 2. Interactive VPI Testing
@@ -437,14 +446,18 @@ make client       # Build VPI client applications
 # VERBOSE=1        # Enable SystemVerilog debug messages
 # DEBUG=1          # Enable VPI server basic debug output
 # DEBUG=2          # Enable VPI server verbose debug output
-# DUMP_FST=1       # Enable runtime FST waveform tracing
-# ENABLE_FST=1     # Build with FST trace support
+# WAVE=fst         # Enable FST waveform tracing
+# WAVE=vcd         # Enable VCD waveform tracing
+# WAVE=1           # Enable FST waveform tracing (default format)
+# WAVE= (unset)    # Disable waveform tracing (fastest)
 
 # Examples:
 # VERBOSE=1 make sim                    # SystemVerilog debug + testbench
 # DEBUG=1 make vpi-sim                  # VPI server debug output
 # VERBOSE=1 DEBUG=2 make vpi-sim        # Both SystemVerilog and VPI debug
-# DUMP_FST=1 make sim                   # Enable waveform tracing
+# WAVE=fst make sim                     # Enable FST waveform tracing
+# WAVE=vcd make vpi-sim                 # Enable VCD waveform tracing
+# WAVE=1 make sim                       # Enable FST waveform tracing (default)
 
 # Synthesis (requires OSS CAD Suite)
 make synth        # Synthesize all modules (JTAG, Debug, System)

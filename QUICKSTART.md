@@ -59,8 +59,9 @@ Test 5: Return to JTAG mode
 brew install gtkwave  # macOS
 sudo apt-get install gtkwave  # Linux
 
-# View waveforms
-gtkwave jtag_sim.fst
+# View waveforms (format depends on WAVE parameter)
+gtkwave jtag_sim.fst    # For WAVE=fst or WAVE=1
+gtkwave jtag_sim.vcd    # For WAVE=vcd
 ```
 
 **Note on cJTAG Testing**: Test 4 and 5 verify cJTAG mode switching in standalone simulation. For VPI/OpenOCD testing, cJTAG is now fully supported - see `make test-cjtag` (15/15 tests passing as of v2.1).
@@ -155,7 +156,9 @@ DEBUG=1 make vpi-sim
 VERBOSE=1 DEBUG=2 make vpi-sim
 
 # Enable waveform tracing
-DUMP_FST=1 make sim
+WAVE=fst make sim    # Generate FST format
+WAVE=vcd make sim    # Generate VCD format
+WAVE=1 make sim      # Generate FST format (default)
 ```
 
 ## Verification Checklist
@@ -163,7 +166,7 @@ DUMP_FST=1 make sim
 - [ ] `make sim` completes successfully
 - [ ] All 5 tests pass
 - [ ] IDCODE reads as `0x1DEAD3FF`
-- [ ] Waveform file `jtag_sim.fst` is generated
+- [ ] Waveform file `jtag_sim.fst` (FST format) or `jtag_sim.vcd` (VCD format) is generated when tracing enabled
 - [ ] VPI simulation starts and listens on port 3333
 - [ ] VPI client connects and reads IDCODE
 
@@ -196,7 +199,7 @@ kill $(lsof -ti:3333)
 
 After successful quick start:
 
-1. **Explore waveforms**: Open `jtag_sim.fst` in GTKWave
+1. **Explore waveforms**: Open `jtag_sim.fst` or `jtag_sim.vcd` in GTKWave (depending on WAVE parameter used)
 2. **Run synthesis**: Try `make synth` to generate gate-level netlists
 3. **Modify IDCODE**: Edit `src/jtag/jtag_dtm.sv`
 4. **Add instructions**: Extend instruction register

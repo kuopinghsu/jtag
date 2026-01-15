@@ -27,14 +27,23 @@ YOSYS := $(OSS_CAD_SUITE)/bin/yosys
 STA := $(OSS_CAD_SUITE)/bin/sta
 
 # Flags
-# Build-time FST waveform support (0=disabled, 1=enabled)
-# Usage: make ENABLE_FST=1 DUMP_FST=1 sim
-ENABLE_FST ?= 0
-VERILATOR_TRACE_FLAG := $(if $(filter 1 yes true TRUE on ON,$(ENABLE_FST)),--trace-fst,)
+# Waveform control: WAVE parameter (default: none)
+# WAVE=fst or WAVE=1 - FST waveform
+# WAVE=vcd - VCD waveform
+# WAVE= or unset - no waveform (fastest)
+# Usage: make WAVE=fst sim
+WAVE ?=
+# Normalize WAVE=1 to fst
+WAVE_FORMAT := $(if $(filter 1,$(WAVE)),fst,$(WAVE))
+# Set Verilator trace flags based on waveform format
+VERILATOR_TRACE_FLAG := $(if $(filter fst,$(WAVE_FORMAT)),--trace-fst,$(if $(filter vcd,$(WAVE_FORMAT)),--trace,))
+# Enable trace format flags for C++ compilation
+ENABLE_FST_FLAG := $(if $(filter fst,$(WAVE_FORMAT)),1,0)
+ENABLE_VCD_FLAG := $(if $(filter vcd,$(WAVE_FORMAT)),1,0)
 # VERBOSE SystemVerilog debug flag - enabled when VERBOSE != 0
 VERBOSE ?= 0
 VERBOSE_FLAG := $(if $(filter-out 0,$(VERBOSE)),+define+VERBOSE=1,)
-VERILATOR_CPPFLAGS := -CFLAGS "-DENABLE_FST=$(ENABLE_FST)"
+VERILATOR_CPPFLAGS := -CFLAGS "-DENABLE_FST=$(ENABLE_FST_FLAG) -DENABLE_VCD=$(ENABLE_VCD_FLAG)"
 VERILATOR_FLAGS := --cc --exe --build -j 4 $(VERILATOR_TRACE_FLAG) --timescale 1ns/1ps \
 				   --top-module jtag_tb --timing -Wno-fatal $(VERILATOR_CPPFLAGS) $(VERBOSE_FLAG)
 VERILATOR_SYS_FLAGS := --cc --exe --build -j 4 $(VERILATOR_TRACE_FLAG) --timescale 1ns/1ps \
@@ -53,12 +62,9 @@ TEST_TIMEOUT ?= 60
 SIM_TIMEOUT_OPT := --timeout $(SIM_TIMEOUT)
 TEST_TIMEOUT_OPT := --timeout $(TEST_TIMEOUT)
 
-# Waveform tracing flag for runtime (--trace) [default: disabled]
-# Usage: make DUMP_FST=1 vpi-sim     (enable tracing)
-#        make DUMP_FST=0 test-jtag   (disable tracing)
-DUMP_FST ?= 0
-TRACE_OPT := $(if $(filter 1 yes true TRUE on ON,$(DUMP_FST)),--trace,)
-TRACE_STATE := $(if $(TRACE_OPT),enabled,disabled)
+# Runtime tracing options based on WAVE parameter
+TRACE_OPT := $(if $(WAVE_FORMAT),--trace,)
+TRACE_STATE := $(if $(WAVE_FORMAT),enabled ($(WAVE_FORMAT)),disabled)
 
 # Debug level for VPI server (0=off, 1=basic, 2=verbose) [default: 0]
 # Usage: make DEBUG=1 test-jtag      (basic debug)
@@ -105,16 +111,18 @@ help:
 	@echo "  TEST_TIMEOUT  (default: $(TEST_TIMEOUT)s, 0=unlimited) for test-* targets"
 	@echo ""
 	@echo "Configurable options:"
-	@echo "  DUMP_FST      (0|1, default: $(DUMP_FST)) - Enable FST waveform tracing"
+	@echo "  WAVE          (fst|vcd|1|unset, default: $(WAVE)) - Waveform format (1=fst)"
 	@echo "  VERBOSE       (0|1, default: $(VERBOSE)) - SystemVerilog debug messages"
 	@echo "  DEBUG         (0|1|2, default: $(DEBUG)) - VPI debug level (0=off, 1=basic, 2=verbose)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make VERBOSE=1 DEBUG=1 test-jtag          (SystemVerilog + VPI debug)"
-	@echo "  make DEBUG=2 DUMP_FST=1 vpi-sim           (verbose VPI debug + waveform tracing)"
-	@echo "Configurable tracing:"
-	@echo "  DUMP_FST      (default: $(DUMP_FST)) waveform tracing is $(TRACE_STATE)"
-	@echo "  ENABLE_FST    (default: $(ENABLE_FST)) build-time FST support"
+	@echo "  make DEBUG=2 WAVE=fst vpi-sim             (verbose VPI debug + FST waveform)"
+	@echo ""
+	@echo "Configurable waveforms:"
+	@echo "  WAVE          (default: $(WAVE)) waveform tracing is $(TRACE_STATE)"
+	@echo "  Formats:      fst (default when WAVE=1), vcd, or unset (no waveform)"
+	@echo ""
 
 all: verilator system vpi sim sim-system vpi-sim client test-vpi test-jtag test-cjtag test-legacy test-combo
 

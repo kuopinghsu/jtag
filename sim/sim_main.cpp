@@ -8,8 +8,14 @@
 #ifndef ENABLE_FST
 #define ENABLE_FST 0
 #endif
+#ifndef ENABLE_VCD
+#define ENABLE_VCD 0
+#endif
 #if ENABLE_FST
 #include "verilated_fst_c.h"
+#endif
+#if ENABLE_VCD
+#include "verilated_vcd_c.h"
 #endif
 #include <iostream>
 #include <iomanip>
@@ -23,22 +29,26 @@ int main(int argc, char** argv) {
     Vjtag_tb* top = new Vjtag_tb{contextp.get()};
 
     // Enable waveform tracing if requested
-
-#if ENABLE_FST
-    VerilatedFstC* trace = NULL;
-    if (argc > 1 && std::string(argv[1]) == "--trace") {
-        contextp->traceEverOn(true);
-        trace = new VerilatedFstC;
-        top->trace(trace, 99);
-        trace->open("jtag_sim.fst");
-        std::cout << "FST trace enabled: jtag_sim.fst" << std::endl;
-    }
-#else
     void* trace = NULL;
     if (argc > 1 && std::string(argv[1]) == "--trace") {
-        std::cout << "FST tracing requested but disabled at build-time (ENABLE_FST=0)" << std::endl;
-    }
+#if ENABLE_FST
+        contextp->traceEverOn(true);
+        VerilatedFstC* fst_trace = new VerilatedFstC;
+        top->trace(fst_trace, 99);
+        fst_trace->open("jtag_sim.fst");
+        trace = fst_trace;
+        std::cout << "FST trace enabled: jtag_sim.fst" << std::endl;
+#elif ENABLE_VCD
+        contextp->traceEverOn(true);
+        VerilatedVcdC* vcd_trace = new VerilatedVcdC;
+        top->trace(vcd_trace, 99);
+        vcd_trace->open("jtag_sim.vcd");
+        trace = vcd_trace;
+        std::cout << "VCD trace enabled: jtag_sim.vcd" << std::endl;
+#else
+        std::cout << "Tracing requested but disabled at build-time (no waveform format enabled)" << std::endl;
 #endif
+    }
 
     std::cout << "\n=== JTAG Verilator Simulation ===" << std::endl;
     std::cout << "Simulation starting..." << std::endl;
@@ -49,24 +59,28 @@ int main(int argc, char** argv) {
         top->eval();
 
         // Dump trace
-    #if ENABLE_FST
         if (trace) {
-            trace->dump(contextp->time());
+#if ENABLE_FST
+            static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+#elif ENABLE_VCD
+            static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
+#endif
         }
-    #endif
 
         // Advance time
         contextp->timeInc(1);
     }
 
     // Cleanup
-
-#if ENABLE_FST
     if (trace) {
-        trace->close();
-        delete trace;
-    }
+#if ENABLE_FST
+        static_cast<VerilatedFstC*>(trace)->close();
+        delete static_cast<VerilatedFstC*>(trace);
+#elif ENABLE_VCD
+        static_cast<VerilatedVcdC*>(trace)->close();
+        delete static_cast<VerilatedVcdC*>(trace);
 #endif
+    }
 
     top->final();
     delete top;
