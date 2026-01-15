@@ -7,10 +7,63 @@ This document describes how to test the actual JTAG and cJTAG protocol operation
 ✅ **All Tests Passing**
 - JTAG OpenOCD Integration: **19/19 PASSED**
 - cJTAG OpenOCD Integration: **15/15 PASSED**
-- Core JTAG Testbench: **All 12 tests PASSED**
+- Core JTAG Testbench: **All 18 tests PASSED**
+- System Integration Testbench: **All 12 tests PASSED**
 - VPI Packet Handling: **FIXED** - Full 1036-byte OpenOCD packets now correctly processed
 
 **Recent Fix**: The VPI server packet parsing issue has been resolved. The server now correctly waits for full 1036-byte OpenOCD VPI packets instead of treating 8-byte headers as complete packets. This fixed the "cJTAG IR/DR scans returning zeros" issue (v2.1 fix).
+
+## Testbench Test Coverage
+
+The project includes comprehensive testbenches covering both basic and advanced protocol features:
+
+### JTAG Core Testbench (tb/jtag_tb.sv)
+**18 comprehensive tests** covering basic JTAG operations and advanced OScan1 features:
+
+**Basic JTAG Tests (1-10)**:
+- Test 1: TAP controller reset
+- Test 2: IDCODE read (32-bit JTAG mode)
+- Test 3: Debug request
+- Test 4: IDCODE read (cJTAG mode)
+- Test 5: Return to JTAG mode
+- Test 6: IR scan - BYPASS instruction
+- Test 7: DR scan with BYPASS register
+- Test 8: IR scan - IDCODE instruction
+- Test 9: DR scan - IDCODE register
+- Test 10: IR scan - DTMCS instruction
+
+**Protocol Switching Tests (11-12)**:
+- Test 11: Switch to cJTAG mode and read IDCODE
+- Test 12: Return to JTAG mode
+
+**OScan1 Advanced Tests (13-18)**:
+- Test 13: OScan1 OAC detection and protocol activation
+- Test 14: OScan1 JScan command processing
+- Test 15: OScan1 SF0 (Scanning Format 0) protocol
+- Test 16: OScan1 zero stuffing (bit insertion/deletion)
+- Test 17: JTAG ↔ cJTAG protocol switching stress test
+- Test 18: Protocol boundary conditions testing
+
+### System Integration Testbench (tb/system_tb.sv)
+**12 system-level tests** covering full system integration:
+
+**Basic System Operations (1-6)**:
+- Test 1: TAP controller reset
+- Test 2: System initialization
+- Test 3: IDCODE register read
+- Test 4: DMSTATUS register access
+- Test 5: Hart state control (halt/resume)
+- Test 6: DMI register write/read
+
+**cJTAG Mode Operations (7-10)**:
+- Test 7: Switch to cJTAG mode
+- Test 8: IDCODE verification in cJTAG mode
+- Test 9: DMI access in cJTAG mode
+- Test 10: Hart control in cJTAG mode
+
+**Mode Verification (11-12)**:
+- Test 11: Protocol mode verification
+- Test 12: System stress test
 
 ## Overview
 

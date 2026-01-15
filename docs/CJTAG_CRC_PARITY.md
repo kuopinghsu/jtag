@@ -24,12 +24,10 @@ The CRC and parity checking module provides robust error detection for cJTAG pac
 │ cJTAG Packet │
 └──────┬───────┘
        │
-       ▼
 ┌──────────────────┐
 │ Byte Accumulator │
 └──────┬───────────┘
        │
-       ├──────────────┬──────────────┐
        ▼              ▼              ▼
 ┌───────────┐  ┌────────────┐   ┌────────┐
 │ CRC-8     │  │ Parity Bit │   │ Data   │
@@ -44,7 +42,6 @@ The CRC and parity checking module provides robust error detection for cJTAG pac
 │  - Parity error      │
 └──────┬───────────────┘
        │
-       ▼
 ┌──────────────────────┐
 │ Error Counters       │
 │ - crc_error_count    │

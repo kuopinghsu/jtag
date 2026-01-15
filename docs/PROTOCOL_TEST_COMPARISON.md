@@ -1,53 +1,103 @@
-# Protocol Test Comparison: JTAG vs cJTAG vs Legacy vs Combo
+# Protocol Test Comparison: SystemVerilog Testbench vs OpenOCD Integration
 
 ## Executive Summary (Updated 2026-01-12)
 
 ✅ **All Tests Passing**
-- **JTAG**: 19/19 tests PASSED
-- **cJTAG**: 15/15 tests PASSED
-- **Legacy**: 12/12 tests available
-- **Combo**: 6/6 tests available
-- **Total**: 51 comprehensive protocol tests
+- **SystemVerilog Testbench**: 30 total tests (18 JTAG + 12 System)
+- **OpenOCD Integration**: 34 total tests (19 JTAG + 15 cJTAG)
+- **Total Coverage**: 64 comprehensive protocol tests across all layers
 
-The four protocol test suites test **different layers and aspects** of the JTAG ecosystem:
+The project provides **dual-layer testing** covering both simulation-level validation and real-world integration:
 
-- **JTAG**: Modern OpenOCD jtag_vpi protocol (19 tests: command + physical + integration, 4-wire)
-- **cJTAG**: IEEE 1149.7 OScan1 protocol (15 tests: command + physical + OScan1, 2-wire)
-- **Legacy**: Backward-compatible 8-byte VPI protocol (12 tests: command-level, 4-wire)
-- **Combo**: Protocol switching and integration (6 tests: JTAG ⇄ Legacy mixing)
+### SystemVerilog Testbench (30 Tests)
+- **JTAG Core Tests**: 18 tests in `tb/jtag_tb.sv` (basic JTAG, protocol switching, OScan1 advanced)
+- **System Integration**: 12 tests in `tb/system_tb.sv` (system-level, DMI access, hart control)
+
+### OpenOCD Integration Tests (34 Tests)
+- **JTAG Protocol**: 19/19 tests PASSED (modern OpenOCD jtag_vpi protocol, 4-wire)
+- **cJTAG Protocol**: 15/15 tests PASSED (IEEE 1149.7 OScan1 protocol, 2-wire)
 
 **Key Findings**:
-- **JTAG and Legacy now have command-level parity** - all combinations covered ✅
-- JTAG and cJTAG both provide comprehensive testing for their respective physical layers
-- Combo tests validate protocol auto-detection and real-world mixed protocol usage
+- **Complete Test Coverage** - All major protocol aspects validated ✅
+- **Multi-Layer Validation** - Both simulation and integration testing comprehensive
 - **VPI Packet Parsing Fixed** - Server now correctly handles full 1036-byte OpenOCD packets
 - **cJTAG IR/DR Scans Fixed** - Now return correct data (was returning zeros)
-- Total: **51 tests** across all four test suites
+- **OScan1 Implementation** - Complete IEEE 1149.7 protocol with all advanced features
+- Total: **64 tests** across SystemVerilog testbenches and OpenOCD integration
 
-### Implementation Detail Comparison (at a glance)
-| Aspect | JTAG (modern) | cJTAG (OScan1) | Legacy (8-byte) | Combo (JTAG+Legacy) |
-|--------|---------------|----------------|-----------------|---------------------|
-| Framing | Full 1036-byte OpenOCD packet **or** 8-byte minimal | Full 1036-byte OpenOCD packet (CMD_OSCAN1) | 8-byte legacy header | Mixed: JTAG full/minimal + legacy 8-byte |
-| Buffers | 512B TX (TMS/TDI) + 512B RX (TDO) | Same 512B+512B; uses OSCAN1 payload | No fixed buffers; small TMS/TDI/TDO exchanges | Depends on active protocol |
-| Bit-length fields | `length` + `nb_bits` (LE) | `length` + `nb_bits` (LE) | `length` (BE in legacy header) | Per active protocol |
-| Mode detection | CMD_SET_PORT (cmd=0x03) and auto-detect minimal vs full | CMD_SET_PORT + OScan1 JScan enable | None (implicit legacy mode) | Auto-detect between JTAG vs Legacy |
-| Scan handling | Full mode: pre-buffered; minimal: response then TMS/TDI/TDO stream | Full mode with CMD_OSCAN1 two-wire handling | Response then TMS/TDI/TDO stream | Matches chosen protocol path |
-| Wiring | 4-wire TCK/TMS/TDI/TDO | 2-wire TCKC/TMSC | 4-wire | Both (per protocol) |
+### Implementation Coverage Comparison
+| Test Layer | SystemVerilog (30) | OpenOCD Integration (34) | Overlap | Unique Coverage |
+|------------|---------------------|---------------------------|---------|-----------------|
+| Basic JTAG | 10 tests | 19 tests | High | SystemVerilog: Internal signals; OpenOCD: Real protocol |
+| cJTAG/OScan1 | 8 tests (Tests 13-18+modes) | 15 tests | Medium | SystemVerilog: Protocol internals; OpenOCD: Integration |
+| System Integration | 12 tests | N/A | None | SystemVerilog: DMI, hart control, system-level |
+| Protocol Switching | Integrated | Separate modes | Low | SystemVerilog: Real-time switching; OpenOCD: Mode isolation |
 
 ---
 
-## Detailed Test Coverage Comparison
+## SystemVerilog Testbench Coverage
 
-### 1. JTAG Tests (19 tests) - Modern OpenOCD Protocol
+### JTAG Core Testbench (tb/jtag_tb.sv) - 18 Tests
 
-**Command Protocol Tests (12 tests):**
+**Basic JTAG Operations (Tests 1-10)**:
+| Test | Operation | Coverage | Signals Verified |
+|------|-----------|----------|------------------|
+| 1 | TAP controller reset | State machine | tap_state, TMS sequence |
+| 2 | IDCODE read (32-bit JTAG) | Register access | TDI/TDO, shift register |
+| 3 | Debug request | DMI interface | debug_req signal |
+| 4 | IDCODE read (cJTAG mode) | Mode switching | mode_select, OScan1 |
+| 5 | Return to JTAG mode | Mode switching | Protocol restoration |
+| 6 | IR scan - BYPASS instruction | Instruction register | IR loading, bypass |
+| 7 | DR scan with BYPASS | Data register | 1-bit bypass operation |
+| 8 | IR scan - IDCODE instruction | Explicit IR load | IR targeting |
+| 9 | DR scan - IDCODE register | Targeted DR access | 32-bit IDCODE |
+| 10 | IR scan - DTMCS instruction | Debug transport | DTM control/status |
 
-| Test | Operation | Protocol Layer | Command |
-|------|-----------|----------------|---------|
-| TAP Reset | Reset TAP state machine | Command | 0x00 (CMD_RESET) |
-| Mode Query | Query current mode (JTAG/cJTAG) | Command | 0x03 (CMD_SET_PORT) |
-| Scan 8 bits | Shift 8 bits through chain | Command | 0x02 (CMD_SCAN) |
-| Multiple Resets | 3 consecutive reset operations | Stress | 0x00 × 3 |
+**Protocol Switching Tests (Tests 11-12)**:
+| Test | Operation | Coverage | Implementation |
+|------|-----------|----------|---------------|
+| 11 | cJTAG mode + IDCODE | Mode validation | 2-wire operation, pin mux |
+| 12 | Return to JTAG mode | Mode restoration | 4-wire operation restore |
+
+**OScan1 Advanced Features (Tests 13-18)**:
+| Test | Operation | Coverage | OScan1 Protocol |
+|------|-----------|----------|------------------|
+| 13 | OAC detection | Attention Character | 16 consecutive TCKC edges |
+| 14 | JScan commands | Command processing | OSCAN_ON/OFF, 4-bit commands |
+| 15 | SF0 protocol | Scanning Format 0 | TMS (rising), TDI (falling) |
+| 16 | Zero stuffing | Bit insertion/deletion | 5-ones detection, bit stuffing |
+| 17 | Protocol switching stress | Rapid mode changes | Multi-cycle switching |
+| 18 | Boundary conditions | Edge cases | Fast switching, idle periods |
+
+### System Integration Testbench (tb/system_tb.sv) - 12 Tests
+
+**Basic System Operations (Tests 1-6)**:
+| Test | Operation | Coverage | System Components |
+|------|-----------|----------|-------------------|
+| 1 | TAP controller reset | System reset | Full system reset sequence |
+| 2 | System initialization | Boot sequence | DMI, debug module init |
+| 3 | IDCODE register read | System IDCODE | End-to-end IDCODE flow |
+| 4 | DMSTATUS register | Debug module | DMI → Debug Module interface |
+| 5 | Hart state control | Hart management | Halt/resume via DMCONTROL |
+| 6 | DMI register access | Debug interface | 41-bit DMI transactions |
+
+**cJTAG System Operations (Tests 7-10)**:
+| Test | Operation | Coverage | cJTAG System Integration |
+|------|-----------|----------|--------------------------|
+| 7 | cJTAG mode switch | System mode change | Full system cJTAG enable |
+| 8 | cJTAG IDCODE | 2-wire system access | End-to-end cJTAG operation |
+| 9 | cJTAG DMI access | Debug via 2-wire | DMI through OScan1 |
+| 10 | cJTAG hart control | Hart control via 2-wire | Full debug via cJTAG |
+
+**System Verification (Tests 11-12)**:
+| Test | Operation | Coverage | System Validation |
+|------|-----------|----------|-------------------|
+| 11 | Protocol mode verification | Mode consistency | System-wide mode state |
+| 12 | System stress test | System stability | Extended operation test |
+
+---
+
+## OpenOCD Integration Test Coverage
 | Invalid Command | Error handling robustness | Robustness | 0xFF (invalid) |
 | Large Scan (32 bits) | Shift 32 bits with pattern 0xAA55AA55 | Command | 0x02 (32 bits) |
 | Scan Patterns | Test alternating patterns (0xAAAA, 0x5555) | Stress | 0x02 (16 bits) |

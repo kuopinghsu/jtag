@@ -19,7 +19,6 @@ This document provides technical details about the JTAG VPI (Virtual Platform In
                                       │   Simulation     │
                                       └──────────────────┘
                                                │
-                                               │
                                       ┌────────▼─────────┐
                                       │    JTAG RTL      │
                                       │ (SystemVerilog)  │

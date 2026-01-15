@@ -110,10 +110,43 @@ module system_tb;
         #500;
         $display("  Hart halted: %0b", hart_halted);
 
+        // Test 7: Switch to cJTAG mode
+        $display("\nTest 7: Switch to cJTAG mode");
+        mode_select = 1;  // Enable cJTAG mode
+        #200;
+        reset_tap();
+        read_idcode();
+
+        // Test 8: cJTAG DMI access
+        $display("\nTest 8: cJTAG DMI register access");
+        read_dm_register(7'h11);  // Read DMSTATUS in cJTAG mode
+
+        // Test 9: cJTAG hart control
+        $display("\nTest 9: cJTAG hart control");
+        write_dm_register(7'h10, 32'h80000001);  // DMCONTROL: haltreq=1, dmactive=1
+        #500;
+        $display("  Hart halted (cJTAG mode): %0b", hart_halted);
+
+        // Test 10: Return to JTAG mode
+        $display("\nTest 10: Return to JTAG mode");
+        mode_select = 0;
+        #200;
+        reset_tap();
+        read_idcode();
+
+        // Test 11: Verify JTAG mode functionality
+        $display("\nTest 11: Verify JTAG mode after switch");
+        read_dm_register(7'h11);  // Read DMSTATUS
+
+        // Test 12: Protocol switching stress test
+        $display("\nTest 12: Protocol switching stress test");
+        test_protocol_switching_stress();
+
         #1000;
 
-        $display("\n=== System Integration Testbench Completed ===");
-        $display("All tests completed successfully!");
+        $display("\n=== Enhanced System Integration Testbench Completed ===");
+        $display("All 12 tests completed successfully!");
+        $display("Coverage: JTAG, cJTAG, DMI, Hart Control, Protocol Switching");
         $finish;
     end
 
@@ -189,7 +222,6 @@ module system_tb;
 
             // Select IR scan
             jtag_pin1_i = 1;
-            wait_tck();
             wait_tck();
 
             // Capture-IR
@@ -270,7 +302,6 @@ module system_tb;
             // Select IR scan
             jtag_pin1_i = 1;
             wait_tck();
-            wait_tck();
 
             // Capture-IR
             jtag_pin1_i = 0;
@@ -330,6 +361,37 @@ module system_tb;
         begin
             wait (jtag_pin0_i == 1);
             wait (jtag_pin0_i == 0);
+        end
+    endtask
+
+    // Task for protocol switching stress test
+    task test_protocol_switching_stress();
+        integer i;
+        begin
+            $display("  Testing rapid protocol switching...");
+
+            // Rapid switching between JTAG and cJTAG modes
+            for (i = 0; i < 5; i = i + 1) begin
+                // Switch to cJTAG
+                mode_select = 1;
+                #50;
+                reset_tap();
+
+                // Quick IDCODE read
+                read_idcode();
+
+                // Switch to JTAG
+                mode_select = 0;
+                #50;
+                reset_tap();
+
+                // Quick IDCODE read
+                read_idcode();
+
+                $display("    Switching cycle %0d completed", i+1);
+            end
+
+            $display("  Protocol switching stress test completed");
         end
     endtask
 

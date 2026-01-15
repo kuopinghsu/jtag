@@ -228,8 +228,6 @@ All patches and reference implementations are in [openocd/patched/](../openocd/p
 - Developer guide: https://openocd.org/doc/doxygen/html/
 - Driver examples: https://github.com/openocd-org/openocd/tree/master/src/jtag/drivers
 
-
-
 ## Troubleshooting
 
 ### Patch Doesn't Apply
@@ -271,7 +269,6 @@ Once patches are applied and OpenOCD is built:
 - OpenOCD can now be used for IEEE 1149.7 debug on cJTAG devices
 
 For detailed reference on what the patches do, see [openocd/patched/README.md](../openocd/patched/README.md).
-
 
 ## Questions?
 
