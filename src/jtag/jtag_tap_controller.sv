@@ -44,8 +44,18 @@ module jtag_tap_controller (
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             current_state <= TEST_LOGIC_RESET;
+`ifdef VERBOSE
+            if (`VERBOSE) $display("[TAP] Reset to TEST_LOGIC_RESET");
+`endif
         end else begin
             current_state <= next_state;
+            if (next_state != current_state) begin
+`ifdef VERBOSE
+                if (`VERBOSE) $display("[TAP] State transition: %s (%h) -> %s (%h) [TMS=%b]",
+                    get_state_name(current_state), current_state,
+                    get_state_name(next_state), next_state, tms);
+`endif
+            end
         end
     end
 
@@ -87,5 +97,42 @@ module jtag_tap_controller (
 
     // Export state for debugging
     assign state = current_state;
+
+`ifdef VERBOSE
+    // Enhanced debug output for TAP control signals
+    always @(posedge clk) begin
+        if (`VERBOSE) begin
+            if (capture_ir) $display("[TAP] *** CAPTURE_IR asserted *** state=%s (%h)", get_state_name(current_state), current_state);
+            if (shift_ir)   $display("[TAP] *** SHIFT_IR asserted *** state=%s (%h)", get_state_name(current_state), current_state);
+            if (update_ir)  $display("[TAP] *** UPDATE_IR asserted *** state=%s (%h)", get_state_name(current_state), current_state);
+            if (capture_dr) $display("[TAP] *** CAPTURE_DR asserted *** state=%s (%h)", get_state_name(current_state), current_state);
+            if (shift_dr)   $display("[TAP] *** SHIFT_DR asserted *** state=%s (%h)", get_state_name(current_state), current_state);
+            if (update_dr)  $display("[TAP] *** UPDATE_DR asserted *** state=%s (%h)", get_state_name(current_state), current_state);
+        end
+    end
+
+    // State name function for readable debug output
+    function string get_state_name(tap_state_t state);
+        case (state)
+            TEST_LOGIC_RESET: return "TEST_LOGIC_RESET";
+            RUN_TEST_IDLE:    return "RUN_TEST_IDLE";
+            DR_SELECT_SCAN:   return "DR_SELECT_SCAN";
+            DR_CAPTURE:       return "DR_CAPTURE";
+            DR_SHIFT:         return "DR_SHIFT";
+            DR_EXIT1:         return "DR_EXIT1";
+            DR_PAUSE:         return "DR_PAUSE";
+            DR_EXIT2:         return "DR_EXIT2";
+            DR_UPDATE:        return "DR_UPDATE";
+            IR_SELECT_SCAN:   return "IR_SELECT_SCAN";
+            IR_CAPTURE:       return "IR_CAPTURE";
+            IR_SHIFT:         return "IR_SHIFT";
+            IR_EXIT1:         return "IR_EXIT1";
+            IR_PAUSE:         return "IR_PAUSE";
+            IR_EXIT2:         return "IR_EXIT2";
+            IR_UPDATE:        return "IR_UPDATE";
+            default:          return "UNKNOWN";
+        endcase
+    endfunction
+`endif
 
 endmodule

@@ -11,9 +11,11 @@
 - VPI interactive runs:
   - `make vpi-sim` (auto protocol detect) or `make vpi-sim-openocd` / `make vpi-sim-legacy` to force mode; server listens on 3333.
   - `make client` builds `build/jtag_vpi_advanced`; `make vpi` builds simple client.
-  - Flags: `DUMP_FST=1` enables runtime tracing; `ENABLE_FST=1` builds trace support; `DEBUG=1|2` increases VPI logs.
+  - Control flags: `VERBOSE=1` enables SystemVerilog debug messages; `DEBUG=1|2` controls VPI server debug levels; `DUMP_FST=1` enables runtime tracing; `ENABLE_FST=1` builds trace support.
   - Timeout: Default = 0 (unlimited, no timeout). Override with `--timeout <seconds>` parameter (0 = unlimited, >0 = timeout in seconds). Configured in sim/sim_vpi_main.cpp DEFAULT_TIMEOUT_SECONDS.
+  - SystemVerilog debug: `VERBOSE=1 make sim` shows TAP state transitions, IR/DR operations, and protocol messages in simulation.
   - VPI debug levels: `DEBUG=1 make vpi-sim` shows concise server activity (connections, protocol detects); `DEBUG=2 make vpi-sim` adds verbose per-scan logging—useful when chasing OpenOCD packet handling.
+  - Combined debug: `VERBOSE=1 DEBUG=2 make vpi-sim` enables both SystemVerilog and VPI server verbose output for comprehensive debugging.
 - OpenOCD integration:
   - Configs in [openocd/jtag.cfg](../openocd/jtag.cfg) and [openocd/cjtag.cfg](../openocd/cjtag.cfg).
   - `make test-jtag` runs end-to-end OpenOCD JTAG flow (reads IDCODE 0x1DEAD3FF) - 19/19 tests passing. Auto-cleans ports 3333/4444.

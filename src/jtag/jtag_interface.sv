@@ -105,4 +105,38 @@ module jtag_interface (
         end
     end
 
+`ifdef VERBOSE
+    // Enhanced mode switching debug
+    logic prev_mode_select;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            prev_mode_select <= 1'b0;
+        end else begin
+            prev_mode_select <= mode_select;
+
+            if (`VERBOSE) begin
+                // Debug mode switches
+                if (mode_select != prev_mode_select) begin
+                    $display("[INTF] *** MODE SWITCH ***");
+                    $display("[INTF]   From: %s", prev_mode_select ? "cJTAG" : "JTAG");
+                    $display("[INTF]   To:   %s", mode_select ? "cJTAG" : "JTAG");
+                end
+
+                // Debug signal routing every few clocks
+                if ($time % (100*1000) == 0) begin // Every 100ms
+                    $display("[INTF] Signal routing check:");
+                    $display("[INTF]   Mode: %s", mode_select ? "cJTAG" : "JTAG");
+                    $display("[INTF]   jtag_clk=%b, jtag_tms=%b, jtag_tdi=%b, jtag_tdo=%b",
+                             jtag_clk, jtag_tms, jtag_tdi, jtag_tdo);
+                    if (mode_select) begin
+                        $display("[INTF]   OScan1: active=%b, error=%b", oscan1_active, oscan1_error);
+                        $display("[INTF]   TMSC: out=%b, oen=%b", tmsc_out, tmsc_oen);
+                    end
+                    $fflush();
+                end
+            end
+        end
+    end
+`endif
+
 endmodule

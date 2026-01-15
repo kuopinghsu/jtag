@@ -183,7 +183,7 @@ Manual validation → AI-updated documentation → Regression tests
 - **Core testbench**: 12/12 tests (TAP, IDCODE, debug, mode switching)
 - **OpenOCD JTAG**: 19/19 tests (connectivity, IR/DR scans, telnet)
 - **OpenOCD cJTAG**: 15/15 tests (OScan1 protocol, two-wire operation) ✨
-- **Legacy protocol**: 11/11 tests (backward compatibility validation)
+- **Legacy protocol**: 12/12 tests (backward compatibility validation)
 - **Protocol switching**: 6/6 tests (JTAG ↔ cJTAG transitions)
 
 ### ⚙️ Synthesis Results

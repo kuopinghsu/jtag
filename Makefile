@@ -1,6 +1,6 @@
 # JTAG/cJTAG SystemVerilog Project Makefile
 
-.PHONY: all clean verilator vpi sim client help test-vpi synth synth-jtag synth-reports synth-clean test-legacy
+.PHONY: all clean verilator vpi sim client help test-vpi synth synth-jtag synth-reports synth-clean test-legacy test-combo
 
 # Directories
 SRC_DIR := src
@@ -31,11 +31,14 @@ STA := $(OSS_CAD_SUITE)/bin/sta
 # Usage: make ENABLE_FST=1 DUMP_FST=1 sim
 ENABLE_FST ?= 0
 VERILATOR_TRACE_FLAG := $(if $(filter 1 yes true TRUE on ON,$(ENABLE_FST)),--trace-fst,)
+# VERBOSE SystemVerilog debug flag - enabled when VERBOSE != 0
+VERBOSE ?= 0
+VERBOSE_FLAG := $(if $(filter-out 0,$(VERBOSE)),+define+VERBOSE=1,)
 VERILATOR_CPPFLAGS := -CFLAGS "-DENABLE_FST=$(ENABLE_FST)"
 VERILATOR_FLAGS := --cc --exe --build -j 4 $(VERILATOR_TRACE_FLAG) --timescale 1ns/1ps \
-				   --top-module jtag_tb --timing -Wno-fatal $(VERILATOR_CPPFLAGS)
+				   --top-module jtag_tb --timing -Wno-fatal $(VERILATOR_CPPFLAGS) $(VERBOSE_FLAG)
 VERILATOR_SYS_FLAGS := --cc --exe --build -j 4 $(VERILATOR_TRACE_FLAG) --timescale 1ns/1ps \
-					   --top-module system_tb --timing -Wno-fatal $(VERILATOR_CPPFLAGS)
+					   --top-module system_tb --timing -Wno-fatal $(VERILATOR_CPPFLAGS) $(VERBOSE_FLAG)
 VPI_CFLAGS := -fPIC
 GCC_CFLAGS := -Wall -O2
 
@@ -78,8 +81,9 @@ help:
 	@echo "  make client         - Build VPI client"
 	@echo "  make test-vpi       - Test VPI server and client (automatic)"
 	@echo "  make test-jtag      - Test JTAG mode with OpenOCD (automatic)"
+	@echo "  make test-cjtag     - Test cJTAG mode with OpenOCD (automatic)"
 	@echo "  make test-legacy    - Test JTAG legacy 8-byte protocol (automatic)"
-	@echo "  make test-cjtag     - Test cJTAG mode with OpenOCD (experimental)"
+	@echo "  make test-combo     - Test protocol switching (JTAG ↔ Legacy) (automatic)"
 	@echo "  make synth          - Synthesize all modules with ASAP7 PDK"
 	@echo "  make synth-jtag     - Synthesize JTAG top module only"
 	@echo "  make synth-reports  - Generate synthesis reports (area, timing, power)"
@@ -91,7 +95,9 @@ help:
 	@echo "  make verilator && make sim      (JTAG testbench)"
 	@echo "  make test-vpi                   (automated VPI test)"
 	@echo "  make test-jtag                  (automated JTAG test)"
+	@echo "  make test-cjtag                 (automated cJTAG test)"
 	@echo "  make test-legacy                (legacy protocol test)"
+	@echo "  make test-combo                 (protocol switching test)"
 	@echo "  make synth                      (ASAP7 synthesis)"
 	@echo ""
 	@echo "Configurable timeouts:"
@@ -100,16 +106,17 @@ help:
 	@echo ""
 	@echo "Configurable options:"
 	@echo "  DUMP_FST      (0|1, default: $(DUMP_FST)) - Enable FST waveform tracing"
+	@echo "  VERBOSE       (0|1, default: $(VERBOSE)) - SystemVerilog debug messages"
 	@echo "  DEBUG         (0|1|2, default: $(DEBUG)) - VPI debug level (0=off, 1=basic, 2=verbose)"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make DEBUG=1 test-jtag          (test with basic debug output)"
-	@echo "  make DEBUG=2 DUMP_FST=1 vpi-sim (verbose debug + waveform tracing)"
+	@echo "  make VERBOSE=1 DEBUG=1 test-jtag          (SystemVerilog + VPI debug)"
+	@echo "  make DEBUG=2 DUMP_FST=1 vpi-sim           (verbose VPI debug + waveform tracing)"
 	@echo "Configurable tracing:"
 	@echo "  DUMP_FST      (default: $(DUMP_FST)) waveform tracing is $(TRACE_STATE)"
 	@echo "  ENABLE_FST    (default: $(ENABLE_FST)) build-time FST support"
 
-all: verilator system vpi sim sim-system vpi-sim client test-vpi test-jtag test-legacy test-cjtag
+all: verilator system vpi sim sim-system vpi-sim client test-vpi test-jtag test-cjtag test-legacy test-combo
 
 verilator: $(BUILD_DIR)
 	@echo "Building Verilator simulation..."
@@ -236,7 +243,7 @@ $(BUILD_DIR)/jtag_vpi: $(BUILD_DIR)
 	@echo "Building VPI interactive simulation..."
 	@mkdir -p $(VERILATOR_DIR)
 	$(VERILATOR) --cc --exe --build -j 4 $(VERILATOR_TRACE_FLAG) --timescale 1ns/1ps \
-		--top-module jtag_vpi_top --timing -Wno-fatal \
+		--top-module jtag_vpi_top --timing -Wno-fatal $(VERBOSE_FLAG) \
 		-I$(JTAG_DIR) -I$(DBG_DIR) -I$(SRC_DIR) -I$(TB_DIR) -I$(SIM_DIR) \
 		-Mdir $(VERILATOR_DIR) \
 		-o ../jtag_vpi \
@@ -448,7 +455,7 @@ test-legacy: $(BUILD_DIR)/jtag_vpi
 		if ./openocd/test_protocol legacy; then \
 			echo ""; \
 			echo "✓ LEGACY PROTOCOL TEST PASSED"; \
-			echo "All 11 tests completed successfully"; \
+			echo "All 12 tests completed successfully"; \
 			kill $$SERVER_PID 2>/dev/null; \
 			exit 0; \
 		else \
@@ -460,4 +467,52 @@ test-legacy: $(BUILD_DIR)/jtag_vpi
 	@echo ""
 	@echo "View waveforms: gtkwave jtag_vpi.fst"
 	@echo "Server log: vpi_legacy.log"
+
+test-combo: $(BUILD_DIR)/jtag_vpi
+	@echo ""
+	@echo "=== Automated Combo Protocol Test ==="
+	@echo "Testing protocol switching and mixed operations (JTAG ↔ Legacy)"
+	@pkill -9 jtag_vpi 2>/dev/null || true
+	@sleep 1
+	@echo "Starting VPI server in auto-detect mode..."
+	@if [ "$(DEBUG)" != "0" ] && [ -n "$(DEBUG)" ]; then \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(TEST_TIMEOUT_OPT) 2>&1 | tee vpi_combo.log & \
+	else \
+		$(BUILD_DIR)/jtag_vpi $(TRACE_OPT) $(DEBUG_OPT) $(TEST_TIMEOUT_OPT) > vpi_combo.log 2>&1 & \
+	fi; \
+	SERVER_PID=$$!; \
+	echo "VPI server PID: $$SERVER_PID"; \
+	sleep 3; \
+	if ! kill -0 $$SERVER_PID 2>/dev/null; then \
+		echo "✗ VPI server failed to start"; \
+		echo "Check vpi_combo.log for details"; \
+		exit 1; \
+	fi; \
+	echo "✓ VPI server started in auto-detect mode"; \
+	echo ""; \
+	echo "Compiling unified protocol test (combo)..."; \
+	gcc -o openocd/test_protocol openocd/test_protocol.c || { \
+		echo "✗ Test compilation failed"; \
+		kill $$SERVER_PID 2>/dev/null; \
+		exit 1; \
+	}; \
+	echo "✓ Tests compiled"; \
+	echo ""; \
+	echo "Server mode: auto-detect (protocol switching support)"; \
+	echo "Running combo protocol test suite..."; \
+	if ./openocd/test_protocol combo; then \
+		echo ""; \
+		echo "✓ COMBO PROTOCOL TEST PASSED"; \
+		echo "All combo tests completed successfully"; \
+		kill $$SERVER_PID 2>/dev/null; \
+		exit 0; \
+	else \
+		echo ""; \
+		echo "✗ COMBO PROTOCOL TEST FAILED"; \
+		kill $$SERVER_PID 2>/dev/null; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "View waveforms: gtkwave jtag_vpi.fst"
+	@echo "Server log: vpi_combo.log"
 

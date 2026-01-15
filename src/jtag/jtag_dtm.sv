@@ -56,12 +56,33 @@ module jtag_dtm (
     // Bypass register
     logic bypass_reg;
 
+    // Test pattern register for scan chain verification
+    // Provides predictable 8-bit patterns for TDI/TDO integrity testing
+    logic [7:0] test_pattern_reg;
+    logic [7:0] test_pattern_shift_reg;
+
     // Current operation tracking
     logic dmi_pending;
     logic [1:0] last_response;  // dmi_resp_e
 
     // IDCODE assignment
     assign idcode = IDCODE_VALUE;
+
+    // Generate rotating test patterns
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            test_pattern_reg <= 8'hAA;  // Start with 0xAA pattern
+        end else if (capture_dr) begin
+            // Rotate through test patterns: AA -> 55 -> FF -> 20 -> AA...
+            case (test_pattern_reg)
+                8'hAA: test_pattern_reg <= 8'h55;
+                8'h55: test_pattern_reg <= 8'hFF;
+                8'hFF: test_pattern_reg <= 8'h20;
+                8'h20: test_pattern_reg <= 8'hAA;
+                default: test_pattern_reg <= 8'hAA;
+            endcase
+        end
+    end
 
     // Build DTMCS register
     always_comb begin
@@ -85,6 +106,7 @@ module jtag_dtm (
             dmi_shift_reg <= 41'h0;
             idcode_shift_reg <= IDCODE_VALUE;
             bypass_reg <= 1'b0;
+            test_pattern_shift_reg <= 8'h0;
             dmi_pending <= 1'b0;
             last_response <= DMI_RESP_SUCCESS;
         end else begin
@@ -96,24 +118,45 @@ module jtag_dtm (
 
             // Capture DR - load appropriate register
             if (capture_dr) begin
+`ifdef VERBOSE
+                if (`VERBOSE) $display("[DTM] *** CAPTURE_DR for IR=0x%h ***", ir_out);
+`endif
                 case (ir_out)
                     IR_IDCODE: begin
                         idcode_shift_reg <= IDCODE_VALUE;
+                        test_pattern_shift_reg <= test_pattern_reg;  // Load test pattern for scan
+`ifdef VERBOSE
+                        if (`VERBOSE) $display("[DTM] IDCODE capture: loaded 0x%h", IDCODE_VALUE);
+`endif
                     end
                     IR_DTMCS: begin
                         idcode_shift_reg <= dtmcs_reg;
+`ifdef VERBOSE
+                        if (`VERBOSE) $display("[DTM] DTMCS capture: loaded 0x%h", dtmcs_reg);
+`endif
                     end
                     IR_DMI: begin
                         // Capture previous response and data
                         dmi_shift_reg[40:34] <= dmi_addr;        // Address
                         dmi_shift_reg[33:2]  <= dmi_rdata;       // Read data
                         dmi_shift_reg[1:0]   <= last_response;   // Response
+`ifdef VERBOSE
+                        if (`VERBOSE) $display("[DTM] DMI capture: addr=0x%h, data=0x%h, resp=%h", dmi_addr, dmi_rdata, last_response);
+`endif
                     end
                     IR_BYPASS: begin
                         bypass_reg <= 1'b0;
+                        test_pattern_shift_reg <= test_pattern_reg;  // Load test pattern for scan
+`ifdef VERBOSE
+                        if (`VERBOSE) $display("[DTM] BYPASS capture: loaded 0");
+`endif
                     end
                     default: begin
                         bypass_reg <= 1'b0;
+                        test_pattern_shift_reg <= test_pattern_reg;  // Load test pattern for default scans
+`ifdef VERBOSE
+                        if (`VERBOSE) $display("[DTM] Default capture: IR=0x%h, loaded 0", ir_out);
+`endif
                     end
                 endcase
             end
@@ -123,15 +166,18 @@ module jtag_dtm (
                 case (ir_out)
                     IR_IDCODE, IR_DTMCS: begin
                         idcode_shift_reg <= {tdi, idcode_shift_reg[31:1]};
+                        test_pattern_shift_reg <= {tdi, test_pattern_shift_reg[7:1]};  // Shift test pattern
                     end
                     IR_DMI: begin
                         dmi_shift_reg <= {tdi, dmi_shift_reg[40:1]};
                     end
                     IR_BYPASS: begin
                         bypass_reg <= tdi;
+                        test_pattern_shift_reg <= {tdi, test_pattern_shift_reg[7:1]};  // Shift test pattern
                     end
                     default: begin
                         bypass_reg <= tdi;
+                        test_pattern_shift_reg <= {tdi, test_pattern_shift_reg[7:1]};  // Shift test pattern
                     end
                 endcase
             end
@@ -141,18 +187,35 @@ module jtag_dtm (
                 dmi_reg <= dmi_shift_reg;
                 if (dmi_shift_reg[1:0] != DMI_OP_NOP) begin
                     dmi_pending <= 1'b1;
+`ifdef VERBOSE
+                    if (`VERBOSE) $display("[DTM] DMI operation pending: addr=0x%h, data=0x%h, op=%h",
+                        dmi_shift_reg[40:34], dmi_shift_reg[33:2], dmi_shift_reg[1:0]);
+`endif
                 end
             end
+`ifdef VERBOSE
+            // Additional shift debug
+            if (shift_dr && `VERBOSE) begin
+                case (ir_out)
+                    IR_IDCODE: $display("[DTM] IDCODE shift: TDI=%b, TDO=%b, reg=0x%h", tdi, idcode_shift_reg[0], idcode_shift_reg);
+                    IR_DTMCS:  $display("[DTM] DTMCS shift: TDI=%b, TDO=%b, reg=0x%h", tdi, idcode_shift_reg[0], idcode_shift_reg);
+                    IR_DMI:    $display("[DTM] DMI shift: TDI=%b, TDO=%b", tdi, dmi_shift_reg[0]);
+                    IR_BYPASS: $display("[DTM] BYPASS shift: TDI=%b, TDO=%b", tdi, bypass_reg);
+                    default:   $display("[DTM] Unknown IR shift: IR=0x%h, TDI=%b, TDO=%b", ir_out, tdi, test_pattern_shift_reg[0]);
+                endcase
+            end
+`endif
         end
     end
 
     // TDO output multiplexer
     always_comb begin
         case (ir_out)
-            IR_IDCODE, IR_DTMCS: tdo = idcode_shift_reg[0];
-            IR_DMI:              tdo = dmi_shift_reg[0];
-            IR_BYPASS:           tdo = bypass_reg;
-            default:             tdo = bypass_reg;
+            IR_IDCODE: tdo = idcode_shift_reg[0];               // Use IDCODE data for IDCODE
+            IR_DTMCS:  tdo = idcode_shift_reg[0];               // Use DTMCS data for DTMCS
+            IR_DMI:    tdo = dmi_shift_reg[0];
+            IR_BYPASS: tdo = test_pattern_shift_reg[0];
+            default:   tdo = test_pattern_shift_reg[0];
         endcase
     end
 

@@ -5,7 +5,7 @@
 ✅ **All Tests Passing**
 - **JTAG**: 19/19 tests PASSED
 - **cJTAG**: 15/15 tests PASSED
-- **Legacy**: 11/11 tests available
+- **Legacy**: 12/12 tests available
 - **Combo**: 6/6 tests available
 - **Total**: 51 comprehensive protocol tests
 
@@ -13,7 +13,7 @@ The four protocol test suites test **different layers and aspects** of the JTAG 
 
 - **JTAG**: Modern OpenOCD jtag_vpi protocol (19 tests: command + physical + integration, 4-wire)
 - **cJTAG**: IEEE 1149.7 OScan1 protocol (15 tests: command + physical + OScan1, 2-wire)
-- **Legacy**: Backward-compatible 8-byte VPI protocol (11 tests: command-level, 4-wire)
+- **Legacy**: Backward-compatible 8-byte VPI protocol (12 tests: command-level, 4-wire)
 - **Combo**: Protocol switching and integration (6 tests: JTAG ⇄ Legacy mixing)
 
 **Key Findings**:
@@ -40,7 +40,7 @@ The four protocol test suites test **different layers and aspects** of the JTAG 
 
 ### 1. JTAG Tests (19 tests) - Modern OpenOCD Protocol
 
-**Command Protocol Tests (11 tests):**
+**Command Protocol Tests (12 tests):**
 
 | Test | Operation | Protocol Layer | Command |
 |------|-----------|----------------|---------|
@@ -71,7 +71,7 @@ The four protocol test suites test **different layers and aspects** of the JTAG 
 - Uses 8-byte command header (cmd, pad[3], length)
 - 4-wire: TCK, TMS, TDI, TDO
 - Modern OpenOCD jtag_vpi format
-- Tests **both** command-level (11 tests) and physical-level (6 tests) operations
+- Tests **both** command-level (12 tests) and physical-level (6 tests) operations
 - **Command-level parity with Legacy achieved** ✅
 - **Protocol framing:**
   - **Minimal (8-byte) mode**: cmd + pad[3] + length (used by `test_protocol` for fast command/scan loops; server auto-detects when only 8 bytes arrive).
@@ -91,7 +91,7 @@ The four protocol test suites test **different layers and aspects** of the JTAG 
 
 ### 2. cJTAG Tests (15 tests) - IEEE 1149.7 OScan1 Protocol
 
-**Physical Layer Tests (11 tests):**
+**Physical Layer Tests (12 tests):**
 
 | Test | Operation | Protocol Layer | Details |
 |------|-----------|----------------|---------|
@@ -260,13 +260,18 @@ All test their respective layers comprehensively!
        uint32_t length;  // little-endian
    };
 
-   // Legacy (8-byte VPI)
    struct legacy_cmd {
        uint8_t cmd;
        uint8_t mode;
        uint8_t reserved[2];
-       uint32_t length;  // big-endiCombo | Notes |
-|---------|------|-------|--------|-------|-------|
+       uint32_t length; /* big-endian */
+   } __attribute__((packed));
+   ```
+
+2. **Test Coverage Matrix:**
+
+| Test Feature | JTAG | cJTAG | Legacy | Combo | Notes |
+|--------------|------|-------|--------|-------|-------|
 | **TAP Reset (Command)** | ✅ | ✅ | ✅ | ✅ | All test CMD_RESET |
 | **TAP Reset (Physical)** | ✅ | ✅ | ❌ | ❌ | JTAG: TMS states, cJTAG: SF0 |
 | **Scan Operations (Command)** | ✅ | ✅ | ✅ | ✅ | All test CMD_SCAN |
@@ -300,21 +305,24 @@ All test their respective layers comprehensively!
 - **JTAG & cJTAG**: Comprehensive physical + command testing for their respective interfaces
 - **Legacy**: Command-level backward compatibility
 - **Combo**: Protocol switching and integration testing (JTAG + Legacy only)
-| **Large Scans (32+ bits)** | ✅ | ✅ | ✅ | All test 32-bit+ scans |
-| **Invalid Commands** | ✅ | ❌ | ✅ | JTAG & Legacy |
-| **Rapid Commands** | ✅ | ✅ | ✅ | All test stress scenarios |
-| **Pattern Scanning** | ✅ | ❌ | ✅ | JTAG & Legacy |
-| **TMS State Machine** | ✅ | ✅* | ✅ | *via SF0 (cJTAG) |
-| **Signal Integrity** | ✅ | ✅* | ❌ | JTAG: TDI/TDO, cJTAG: TMSC |
-| **Boundary Scan Simulation** | ✅ | ✅* | ❌ | *via SF0 (cJTAG) |
-| **IDCODE Read Simulation** | ✅ | ✅* | ❌ | *via SF0 (cJTAG) |
-| **Variable Register Lengths** | ✅ | ✅* | ❌ | 8-64 bits tested |
-| **Clock Frequency Stress** | ✅ | ✅* | ❌ | JTAG: TCK, cJTAG: TCKC |
-| **OAC Detection** | ❌ | ✅ | ❌ | cJTAG only |
-| **JScan Commands** | ❌ | ✅ | ❌ | cJTAG only |
-| **Bit Stuffing** | ❌ | ✅ | ❌ | cJTAG only |
-| **CRC-8 Checking** | ❌ | ✅ | ❌ | cJTAG only |
-| **SF0 Encoding** | ❌ | ✅ | ❌ | cJTAG only |
+
+| **Feature** | **JTAG** | **cJTAG** | **Legacy** | **Combo** | **Details** |
+|---|---|---|---|---|---|
+| **Large Scans (32+ bits)** | ✅ | ✅ | ✅ | ❌ | All test 32-bit+ scans |
+| **Invalid Commands** | ✅ | ❌ | ✅ | ❌ | JTAG & Legacy |
+| **Rapid Commands** | ✅ | ✅ | ✅ | ❌ | All test stress scenarios |
+| **Pattern Scanning** | ✅ | ❌ | ✅ | ❌ | JTAG & Legacy |
+| **TMS State Machine** | ✅ | ✅* | ✅ | ❌ | *via SF0 (cJTAG) |
+| **Signal Integrity** | ✅ | ✅* | ❌ | ❌ | JTAG: TDI/TDO, cJTAG: TMSC |
+| **Boundary Scan Simulation** | ✅ | ✅* | ❌ | ❌ | *via SF0 (cJTAG) |
+| **IDCODE Read Simulation** | ✅ | ✅* | ❌ | ❌ | *via SF0 (cJTAG) |
+| **Variable Register Lengths** | ✅ | ✅* | ❌ | ❌ | 8-64 bits tested |
+| **Clock Frequency Stress** | ✅ | ✅* | ❌ | ❌ | JTAG: TCK, cJTAG: TCKC |
+| **OAC Detection** | ❌ | ✅ | ❌ | ❌ | cJTAG only |
+| **JScan Commands** | ❌ | ✅ | ❌ | ❌ | cJTAG only |
+| **Bit Stuffing** | ❌ | ✅ | ❌ | ❌ | cJTAG only |
+| **CRC-8 Checking** | ❌ | ✅ | ❌ | ❌ | cJTAG only |
+| **SF0 Encoding** | ❌ | ✅ | ❌ | ❌ | cJTAG only |
 
 **Key Insight**: Both JTAG and cJTAG now provide **comprehensive physical + command layer testing** for their respective physical interfaces (4-wire vs 2-wire). Combo tests add **protocol switching validation**.
 
@@ -322,10 +330,25 @@ All test their respective layers comprehensively!
 
 The four protocol test suites provide **layered coverage**:
 
-1. **JTAG** (19 tests) - **Complete 4-wire validation** (11 command + 6 physical + 2 integration) ⭐
-2. **cJTAG** (15 tests) - **Complete 2-wire validation** (physical + command + OScan1 protocol) ⭐
-3. **Legacy** (11 tests) - **Complete command-level validation** (backward compatibility) ⭐
-4. **Combo** (6 tests) - **Protocol switching & integration** (JTAG ⇄ Legacy) ⭐
+1. **JTAG** (19 tests) - **Complete 4-wire validation** ⭐
+   - Command-level: 12 tests (reset, scan, mode query, patterns)
+   - Physical-layer: 6 tests (4-wire signals, TAP states, TDI/TDO)
+   - Integration: 2 tests (OpenOCD connectivity, telnet interface)
+
+2. **cJTAG** (15 tests) - **Complete 2-wire validation** ⭐
+   - Command-level: 8 tests (reset, scan, mode detection)
+   - Physical-layer: 5 tests (2-wire signals, SF0 encoding, OAC/JScan)
+   - OScan1-specific: 2 tests (bit stuffing, CRC-8 error detection)
+
+3. **Legacy** (12 tests) - **Complete command-level validation** ⭐
+   - Command patterns identical to JTAG (backward compatibility)
+   - 8-byte protocol format validation
+   - Identical command coverage as JTAG (no gaps)
+
+4. **Combo** (6 tests) - **Protocol switching & integration** ⭐
+   - Sequential mode transitions (JTAG → Legacy, Legacy → JTAG)
+   - Rapid protocol switching (5x cycles)
+   - Auto-detection validation
 
 **Key Findings (Updated 2026-01-12)**:
 - ✅ **VPI Packet Parsing FIXED** - Server now correctly waits for full 1036-byte packets
@@ -355,7 +378,7 @@ The four protocol test suites provide **layered coverage**:
 - **4-wire JTAG hardware**: Use JTAG tests (19 tests: comprehensive validation)
 - **2-wire cJTAG hardware**: Use cJTAG tests (15 tests: full OScan1 coverage)
 - **Multi-protocol systems**: Add Combo tests (6 tests: switching validation) ⭐
-- **Legacy compatibility**: Use Legacy tests (11 tests: same command coverage as JTAG) ✅
+- **Legacy compatibility**: Use Legacy tests (12 tests: same command coverage as JTAG) ✅
 - **Production validation**: Run JTAG + cJTAG + Legacy + Combo (51 tests total)
 
 ---

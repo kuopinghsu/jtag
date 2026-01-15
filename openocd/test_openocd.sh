@@ -180,14 +180,21 @@ fi
 # Test 4: Telnet interface responsive
 echo ""
 echo "Test 4: Telnet Interface"
-if echo "$TEST_OUTPUT" | grep -q "Open On-Chip Debugger\|Listening\|help"; then
+# Check for successful telnet connection first (connection reset after quit is expected)
+if grep -q "accepting 'telnet' connection on tcp/4444" "$LOG_FILE" 2>/dev/null; then
+    echo "  ✓ PASS: Telnet interface accepting connections"
+    PASS_COUNT=$((PASS_COUNT + 1))
+elif echo "$TEST_OUTPUT" | grep -q "Open On-Chip Debugger\|Listening\|help"; then
     echo "  ✓ PASS: Telnet interface responsive"
     PASS_COUNT=$((PASS_COUNT + 1))
+elif echo "$TEST_OUTPUT" | grep -q "Connection refused\|Connection closed"; then
+    echo "  ✗ FAIL: Telnet connection error (connection refused/closed)"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 elif [ -n "$TEST_OUTPUT" ]; then
-    echo "  ⚠ PASS: Telnet connection established"
+    echo "  ⚠ PASS: Telnet connection established (unexpected output)"
     PASS_COUNT=$((PASS_COUNT + 1))
 else
-    echo "  ✗ FAIL: Telnet connection failed"
+    echo "  ✗ FAIL: Telnet connection failed (no output)"
     FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 
@@ -197,8 +204,8 @@ echo "=== Test Summary ==="
 echo "Passed: $PASS_COUNT"
 echo "Failed: $FAIL_COUNT"
 
-# Overall result - pass if at least 3 tests pass
-if [ $PASS_COUNT -ge 3 ]; then
+# Overall result - fail if ANY test fails
+if [ $FAIL_COUNT -eq 0 ]; then
     echo ""
     echo "✓ OPENOCD CONNECTIVITY TESTS PASSED"
     OPENOCD_RESULT=0
@@ -324,8 +331,8 @@ if [ "$MODE" == "jtag" ]; then
     echo ""
     echo "Note: Run 'make test-legacy' to test legacy 8-byte protocol separately"
 
-    # For JTAG mode, require connectivity test to pass
-    if [ $OPENOCD_RESULT -eq 0 ]; then
+    # For JTAG mode, require both connectivity and protocol tests to pass
+    if [ $OPENOCD_RESULT -eq 0 ] && [ "${PROTOCOL_RESULT:-1}" -eq 0 ]; then
         echo ""
         echo "✓ ALL TESTS PASSED"
         echo "  (OpenOCD connectivity verified with modern jtag_vpi protocol)"
@@ -336,6 +343,9 @@ if [ "$MODE" == "jtag" ]; then
         echo ""
         if [ $OPENOCD_RESULT -ne 0 ]; then
             echo "  ✗ OpenOCD connectivity failed"
+        fi
+        if [ "${PROTOCOL_RESULT:-1}" -ne 0 ]; then
+            echo "  ✗ JTAG protocol tests failed"
         fi
         if [ "${LEGACY_RESULT:-1}" -ne 0 ]; then
             echo "  ✗ Legacy protocol tests failed"
@@ -354,7 +364,6 @@ elif [ "$MODE" == "cjtag" ]; then
     echo "cJTAG protocol:       $([ "${PROTOCOL_RESULT:-1}" -eq 0 ] && echo "PASS" || echo "FAIL")"
     echo "Legacy protocol:      $([ "${LEGACY_RESULT:-1}" -eq 0 ] && echo "PASS" || echo "FAIL")"
     echo ""
-    echo "╔═══════════════════════════════════════════════════════════════╗"
     echo "║  IMPORTANT: Understanding cJTAG Test Results                  ║"
     echo "╠═══════════════════════════════════════════════════════════════╣"
     echo "║  These tests validate:                                        ║"
@@ -376,7 +385,6 @@ elif [ "$MODE" == "cjtag" ]; then
     echo "║    Apply patches from openocd/patched/ directory              ║"
     echo "║    Read docs/OPENOCD_CJTAG_PATCH_GUIDE.md                     ║"
     echo "╚═══════════════════════════════════════════════════════════════╝"
-    echo ""
 
     # In cJTAG mode, fail the run if any test fails (connectivity, protocol, or legacy)
     if [ $OPENOCD_RESULT -ne 0 ] || [ "${LEGACY_RESULT:-1}" -ne 0 ] || [ "${PROTOCOL_RESULT:-1}" -ne 0 ]; then

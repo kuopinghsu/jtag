@@ -35,7 +35,21 @@ module jtag_vpi_top
     logic                      dmi_req_valid;
     logic                      dmi_req_ready;
 
+    // Test data register for scan chain verification
+    // Provides predictable patterns that can be read via JTAG
+    logic [31:0] test_data_reg;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            test_data_reg <= 32'hA5A5A5A5;  // Initial test pattern
+        end else begin
+            // Rotate pattern on each clock for variety
+            test_data_reg <= {test_data_reg[30:0], test_data_reg[31]};
+        end
+    end
+
     // DMI dummy response - always ready with success
+    // Returns test patterns based on address for scan chain testing
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             dmi_rdata <= '0;
@@ -45,7 +59,15 @@ module jtag_vpi_top
             dmi_req_ready <= 1'b1;
             dmi_resp <= DMI_RESP_SUCCESS;
             if (dmi_req_valid) begin
-                dmi_rdata <= 32'hDEADBEEF;  // Dummy data
+                // Return predictable test patterns based on address
+                case (dmi_addr)
+                    7'h00: dmi_rdata <= test_data_reg;           // Rotating pattern
+                    7'h01: dmi_rdata <= 32'hAA55AA55;            // Pattern 1
+                    7'h02: dmi_rdata <= 32'h55AA55AA;            // Pattern 2
+                    7'h03: dmi_rdata <= 32'hFF00FF00;            // Pattern 3
+                    7'h04: dmi_rdata <= 32'h00FF00FF;            // Pattern 4
+                    default: dmi_rdata <= {dmi_addr, dmi_addr, dmi_addr, dmi_addr, 4'h0};  // Address-based pattern
+                endcase
             end
         end
     end

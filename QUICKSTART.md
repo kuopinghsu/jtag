@@ -143,6 +143,19 @@ make client
 
 # Run automated VPI test
 make test-vpi
+
+# Debug Parameters
+# Enable SystemVerilog debug messages
+VERBOSE=1 make sim
+
+# Enable VPI server debug output
+DEBUG=1 make vpi-sim
+
+# Enable both SystemVerilog and VPI debug
+VERBOSE=1 DEBUG=2 make vpi-sim
+
+# Enable waveform tracing
+DUMP_FST=1 make sim
 ```
 
 ## Verification Checklist

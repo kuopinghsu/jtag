@@ -433,6 +433,19 @@ make vpi-sim      # Build & run VPI simulation (interactive)
 make test-vpi     # Run automated VPI test
 make client       # Build VPI client applications
 
+# Debug Control Parameters
+# VERBOSE=1        # Enable SystemVerilog debug messages
+# DEBUG=1          # Enable VPI server basic debug output
+# DEBUG=2          # Enable VPI server verbose debug output
+# DUMP_FST=1       # Enable runtime FST waveform tracing
+# ENABLE_FST=1     # Build with FST trace support
+
+# Examples:
+# VERBOSE=1 make sim                    # SystemVerilog debug + testbench
+# DEBUG=1 make vpi-sim                  # VPI server debug output
+# VERBOSE=1 DEBUG=2 make vpi-sim        # Both SystemVerilog and VPI debug
+# DUMP_FST=1 make sim                   # Enable waveform tracing
+
 # Synthesis (requires OSS CAD Suite)
 make synth        # Synthesize all modules (JTAG, Debug, System)
 make synth-jtag   # Synthesize JTAG top module only
@@ -611,7 +624,7 @@ The project uses a **two-layer testing approach** to balance speed, simplicity, 
 - **Test Coverage** (Updated 2026-01-12):
   - JTAG: 19 tests PASSED (command + physical + integration layers)
   - cJTAG: 15 tests PASSED (command + physical + OScan1 protocol layers)
-  - Legacy: 11 tests (direct protocol validation)
+  - Legacy: 12 tests (direct protocol validation)
   - Combo: 6 tests (protocol switching validation)
 
 **Why This Split?**

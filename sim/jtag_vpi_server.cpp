@@ -38,9 +38,22 @@ struct vpi_resp {
 };
 
 JtagVpiServer::JtagVpiServer(int port)
-    : port(port), server_sock(-1), client_sock(-1),
-      scan_state(SCAN_IDLE), scan_is_legacy(true), scan_num_bits(0), scan_num_bytes(0),
-            scan_bit_index(0), scan_bytes_received(0), scan_bytes_sent(0) {
+    : port(port),
+      server_sock(-1),
+      client_sock(-1),
+      current_tdo(0),
+      current_tdo_en(0),
+      current_idcode(0),
+      current_mode(0),
+      msb_first(false),
+      debug_level(0),
+      scan_state(SCAN_IDLE),
+      scan_is_legacy(true),
+      scan_num_bits(0),
+      scan_num_bytes(0),
+      scan_bit_index(0),
+      scan_bytes_received(0),
+      scan_bytes_sent(0) {
     pending_tms = 0;
     pending_tdi = 0;
     pending_mode_select = 0;  // Will be set by set_mode() from command-line
@@ -49,10 +62,6 @@ JtagVpiServer::JtagVpiServer(int port)
     tckc_state = 0;
     pending_tckc_toggle = false;
     tckc_toggle_consumed = false;  // Initialize SF0 synchronization flag
-    current_tdo = 0;
-    current_idcode = 0;
-    current_mode = 0;  // Will be updated by simulation feedback
-    debug_level = 0;  // Default: no debug output
     // Initialize command buffer
     memset(cmd_buf, 0, sizeof(cmd_buf));
     cmd_bytes_received = 0;
@@ -173,15 +182,26 @@ void JtagVpiServer::poll() {
             DBG_PRINT(2, "[VPI][DBG] Protocol detection: cmd_byte=0x%02x, bytes=%d\n", cmd_byte, minimal_rx_bytes);
 
             if (minimal_rx_bytes >= sizeof(minimal_cmd_rx)) {
-                // Have at least 8 bytes - check if we should continue reading for full packet
-                // Default to OpenOCD protocol (which uses 1036-byte packets)
-                DBG_PRINT(1, "[VPI][DBG] OpenOCD protocol detected (cmd=0x%02x), waiting for full packet\n", cmd_byte);
+                // Have at least 8 bytes - decide between minimal 8-byte flow vs full 1036-byte OpenOCD packet
+                uint8_t peek_buf[16];
+                ssize_t peek_ret = recv(client_sock, peek_buf, sizeof(peek_buf), MSG_DONTWAIT | MSG_PEEK);
+                bool more_data_available = (peek_ret > 0);
+
                 protocol_mode = PROTO_OPENOCD_VPI;
-                memcpy(&vpi_cmd_rx, &minimal_cmd_rx, sizeof(minimal_cmd_rx));
-                vpi_rx_bytes = sizeof(minimal_cmd_rx);
-                minimal_rx_bytes = 0;
-                memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
-                vpi_minimal_mode = false;  // Don't use minimal mode - wait for full 1036-byte packet
+
+                if (more_data_available) {
+                    // More data already buffered on the socket - treat as full OpenOCD packet
+                    DBG_PRINT(1, "[VPI][DBG] OpenOCD protocol detected (cmd=0x%02x), waiting for full packet\n", cmd_byte);
+                    memcpy(&vpi_cmd_rx, &minimal_cmd_rx, sizeof(minimal_cmd_rx));
+                    vpi_rx_bytes = sizeof(minimal_cmd_rx);
+                    minimal_rx_bytes = 0;
+                    memset(&minimal_cmd_rx, 0, sizeof(minimal_cmd_rx));
+                    vpi_minimal_mode = false;  // Expect 1036-byte packet
+                } else {
+                    // No extra data yet - stay in minimal (8-byte) mode for legacy/simple clients
+                    DBG_PRINT(1, "[VPI][DBG] Minimal 8-byte protocol detected (cmd=0x%02x)\n", cmd_byte);
+                    vpi_minimal_mode = true;
+                }
             } else {
                 return;
             }
