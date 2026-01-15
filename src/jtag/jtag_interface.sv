@@ -106,33 +106,62 @@ module jtag_interface (
     end
 
 `ifdef VERBOSE
-    // Enhanced mode switching debug
+    // Enhanced mode switching debug and signal change detection
     logic prev_mode_select;
+    logic prev_jtag_clk, prev_jtag_tms, prev_jtag_tdi, prev_jtag_tdo;
+    logic prev_oscan1_active, prev_oscan1_error;
+    logic prev_tmsc_out, prev_tmsc_oen;
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             prev_mode_select <= 1'b0;
+            prev_jtag_clk <= 1'b0;
+            prev_jtag_tms <= 1'b0;
+            prev_jtag_tdi <= 1'b0;
+            prev_jtag_tdo <= 1'b0;
+            prev_oscan1_active <= 1'b0;
+            prev_oscan1_error <= 1'b0;
+            prev_tmsc_out <= 1'b0;
+            prev_tmsc_oen <= 1'b0;
         end else begin
             prev_mode_select <= mode_select;
 
             if (`VERBOSE) begin
                 // Debug mode switches
                 if (mode_select != prev_mode_select) begin
-                    $display("[INTF] *** MODE SWITCH ***");
+                    $display("[INTF] @%0t *** MODE SWITCH ***", $time);
                     $display("[INTF]   From: %s", prev_mode_select ? "cJTAG" : "JTAG");
                     $display("[INTF]   To:   %s", mode_select ? "cJTAG" : "JTAG");
                 end
 
-                // Debug signal routing every few clocks
-                if ($time % (100*1000) == 0) begin // Every 100ms
-                    $display("[INTF] Signal routing check:");
-                    $display("[INTF]   Mode: %s", mode_select ? "cJTAG" : "JTAG");
-                    $display("[INTF]   jtag_clk=%b, jtag_tms=%b, jtag_tdi=%b, jtag_tdo=%b",
+                // Debug signal changes only (not periodic)
+                if (jtag_clk != prev_jtag_clk || jtag_tms != prev_jtag_tms ||
+                    jtag_tdi != prev_jtag_tdi || jtag_tdo != prev_jtag_tdo ||
+                    (mode_select && (oscan1_active != prev_oscan1_active ||
+                                    oscan1_error != prev_oscan1_error ||
+                                    tmsc_out != prev_tmsc_out ||
+                                    tmsc_oen != prev_tmsc_oen))) begin
+
+                    $display("[INTF] @%0t [%s] jtag_clk=%b, jtag_tms=%b, jtag_tdi=%b, jtag_tdo=%b",
+                             $time, mode_select ? "cJTAG" : "JTAG",
                              jtag_clk, jtag_tms, jtag_tdi, jtag_tdo);
                     if (mode_select) begin
                         $display("[INTF]   OScan1: active=%b, error=%b", oscan1_active, oscan1_error);
                         $display("[INTF]   TMSC: out=%b, oen=%b", tmsc_out, tmsc_oen);
                     end
                     $fflush();
+                end
+
+                // Always update previous values every cycle (not just on changes)
+                prev_jtag_clk <= jtag_clk;
+                prev_jtag_tms <= jtag_tms;
+                prev_jtag_tdi <= jtag_tdi;
+                prev_jtag_tdo <= jtag_tdo;
+                if (mode_select) begin
+                    prev_oscan1_active <= oscan1_active;
+                    prev_oscan1_error <= oscan1_error;
+                    prev_tmsc_out <= tmsc_out;
+                    prev_tmsc_oen <= tmsc_oen;
                 end
             end
         end

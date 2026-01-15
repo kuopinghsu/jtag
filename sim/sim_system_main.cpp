@@ -47,7 +47,6 @@ int main(int argc, char** argv) {
     while (!contextp->gotFinish()) {
         top->eval();
 
-
 #if ENABLE_FST
         if (trace) {
             trace->dump(contextp->time());

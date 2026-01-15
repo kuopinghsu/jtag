@@ -232,8 +232,11 @@ int main(int argc, char** argv) {
     // Main simulation loop
     while (!contextp->gotFinish()) {
         // Generate 50% duty cycle clock based on simulation time
-        // Clock period = 10ns (100MHz), so toggle every 5ns
-        top->clk = (contextp->time() / 5) & 1;
+        // Clock period = 10ns (100MHz), so toggle every 5ns = 5000ps
+        // contextp->time() is in picoseconds (ps) with timescale 1ns/1ps
+        uint8_t new_clk = (contextp->time() / 5000) & 1;
+
+        top->clk = new_clk;
 
         // On positive clock edge, poll VPI server
         if (top->clk && (cycle_count % 10) == 0) {
@@ -245,6 +248,7 @@ int main(int argc, char** argv) {
                 client_connected_once = true;
             }
 
+            // VPI server is ready for external client connections
             // Update VPI server with current signal values
             // TDO tri-state: when tdo_en=0 (high-z), JTAG default is 1
             uint8_t tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
@@ -269,10 +273,16 @@ int main(int argc, char** argv) {
                 signal_log_count++;
             }
 
-            // Get pending commands from VPI clients
+            // TCK generation: mutually exclusive modes to avoid conflicts
+            // Either VPI client controls TCK, or automatic test pattern generates it
+
+            // Only override with VPI commands if there's an active client connection
             uint8_t tms, tdi, mode_sel;
             bool tck_pulse, tckc_toggle = false;
-            if (vpi_server.get_pending_signals(&tms, &tdi, &mode_sel, &tck_pulse, &tckc_toggle)) {
+            bool client_connected = vpi_server.is_client_connected();
+            bool has_pending_signals = client_connected && vpi_server.get_pending_signals(&tms, &tdi, &mode_sel, &tck_pulse, &tckc_toggle);
+
+            if (has_pending_signals) {
                 top->jtag_pin1_i = tms;
                 top->jtag_pin2_i = tdi;
                 top->mode_select = mode_sel;
@@ -343,43 +353,16 @@ int main(int argc, char** argv) {
                         top->active_mode
                     );
                 }
-            } else if ((cycle_count % 1000) == 0) {
-                // No VPI client connected: generate automatic test pattern
-                // This makes pins toggle even during test-vpi so you can see activity in VCD
-                static int auto_test_state = 0;
-                static int auto_test_cycle = 0;
+            } else {
+                // No VPI client connected: Keep pins in stable state
+                // TCK=0 (idle), TMS=0, TDI=0 for proper JTAG idle state
+                // This ensures clean waveforms when VPI client connects
+                top->jtag_pin0_i = 0;  // TCK idle (low)
+                top->jtag_pin1_i = 0;  // TMS=0 (stay in current state)
+                top->jtag_pin2_i = 0;  // TDI=0 (no data input)
 
-                switch (auto_test_state) {
-                    case 0: // TAP Reset sequence (TMS high for several clocks)
-                        top->jtag_pin1_i = 1;  // TMS high
-                        top->jtag_pin2_i = 0;  // TDI low
-                        top->jtag_pin0_i = (auto_test_cycle & 1);  // Toggle TCK
-                        if (++auto_test_cycle >= 10) {
-                            auto_test_state = 1;
-                            auto_test_cycle = 0;
-                        }
-                        break;
-
-                    case 1: // Go to Run-Test/Idle (TMS low)
-                        top->jtag_pin1_i = 0;  // TMS low
-                        top->jtag_pin2_i = 0;  // TDI low
-                        top->jtag_pin0_i = (auto_test_cycle & 1);  // Toggle TCK
-                        if (++auto_test_cycle >= 4) {
-                            auto_test_state = 2;
-                            auto_test_cycle = 0;
-                        }
-                        break;
-
-                    case 2: // Generate scan-like patterns
-                        top->jtag_pin1_i = (auto_test_cycle >> 2) & 1;  // Slow TMS pattern
-                        top->jtag_pin2_i = auto_test_cycle & 1;         // Alternating TDI
-                        top->jtag_pin0_i = (auto_test_cycle >> 1) & 1;  // Medium TCK pattern
-                        if (++auto_test_cycle >= 32) {
-                            auto_test_state = 0;  // Loop back to start
-                            auto_test_cycle = 0;
-                        }
-                        break;
-                }
+                // Keep mode_select as set by command-line flag
+                // (don't change it during simulation)
             }
 
             // Print status every 20000000 cycles (20M cycles = less frequent logging)
