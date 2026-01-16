@@ -22,6 +22,12 @@
 #include <iostream>
 #include <iomanip>
 
+// Clock period = 10ns (100MHz)
+#define CLK_PERIOD 10000
+
+// JTAG TCK clock period = 40ns (25MHz)
+#define TCK_PERIOD 40000
+
 // Global exit code for VL_USER_FINISH
 static int global_exit_code = 0;
 static Vjtag_vpi_top* global_top = nullptr;
@@ -213,10 +219,12 @@ int main(int argc, char** argv) {
     int reset_tck_cycles = 0;
     const int SYSTEM_RESET_CYCLES = 50;
     const int JTAG_RESET_TCK_CYCLES = 5;
-    const int TCK_CLK_RATIO = 4;  // TCK frequency = CLK frequency / 4
+    const int TCK_CLK_RATIO = (TCK_PERIOD/CLK_PERIOD);  // TCK frequency = CLK frequency / 4
+    std::cout << "[DEBUG] Timing config: CLK_PERIOD=" << CLK_PERIOD << "ps, TCK_PERIOD=" << TCK_PERIOD << "ps, TCK_CLK_RATIO=" << TCK_CLK_RATIO << std::endl;
 
     // TCK generation counters for constant frequency
     int tck_clk_counter = 0;
+    bool clk_pulse_phase = false;  // false=low, true=high
     bool tck_pulse_phase = false;  // false=low, true=high
     int clk_div_counter = 0;       // For VPI processing timing
 
@@ -224,11 +232,18 @@ int main(int argc, char** argv) {
     std::cout << "[SIM] Starting system reset phase..." << std::endl;
 
     // Main simulation loop with integrated reset
+    std::cout << "[DEBUG] Entering main simulation loop..." << std::endl;
     while (!contextp->gotFinish()) {
-        // Generate constant 50% duty cycle CLK (100MHz)
-        // Clock period = 10ns, so toggle every 5000ps
-        uint8_t new_clk = (contextp->time() / 5000) & 1;
-        top->clk = new_clk;
+        // CRITICAL: Poll VPI server FIRST - ensures continuous socket monitoring
+        // regardless of simulation state (fixes architectural polling limitation)
+        vpi_server.poll();
+
+        // Generate constant 50% duty cycle CLK
+        if (clk_pulse_phase) {
+            top->clk = 1;
+        } else {
+            top->clk = 0;
+        }
 
         // Comprehensive VPI simulation state machine
         switch (sim_state) {
@@ -290,12 +305,18 @@ int main(int argc, char** argv) {
 
             case SIM_IDLE:
                 // Idle state: wait for VPI activity or handle background tasks
-                vpi_server.poll();
+                // NOTE: VPI server polling now happens at the beginning of the main loop (line 237)
+                // This ensures continuous polling across all simulation states, not just IDLE
 
                 // Check if VPI server becomes active (has pending operations)
                 uint8_t tms, tdi, mode_sel;
                 bool tck_pulse;
                 if (vpi_server.get_pending_signals(&tms, &tdi, &mode_sel, &tck_pulse)) {
+                    if (debug_level >= 2) {
+                        std::cout << "[VPI][DEBUG] SIM_IDLE: VPI signals detected - switching to SIM_VPI_ACTIVE"
+                                  << " (TMS=" << (int)tms << ", TDI=" << (int)tdi
+                                  << ", TCK_pulse=" << (tck_pulse ? "true" : "false") << ")" << std::endl;
+                    }
                     sim_state = SIM_VPI_ACTIVE;
                 }
                 break;
@@ -303,14 +324,52 @@ int main(int argc, char** argv) {
             case SIM_VPI_ACTIVE:
                 // Track client connection status
                 if (!client_connected_once && vpi_server.is_client_connected()) {
-                    std::cout << "[VPI] ✓ OpenOCD/Client connected successfully!" << std::endl;
+                    auto connection_time = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::steady_clock::now() - start_time).count();
+                    std::cout << "[VPI] ✓ OpenOCD/Client connected successfully after " << connection_time << "s!" << std::endl;
+                    if (debug_level >= 2) {
+                        std::cout << "[VPI][DEBUG] Client connection established, switching to active mode" << std::endl;
+                        std::cout << "[VPI][DEBUG] Connection latency: " << connection_time << " seconds" << std::endl;
+                    }
                     client_connected_once = true;
+                } else if (!client_connected_once) {
+                    static int conn_check_count = 0;
+                    static auto last_connection_debug = std::chrono::steady_clock::now();
+                    if (++conn_check_count % 5000000 == 0) {
+                        if (debug_level >= 2) {
+                            auto now = std::chrono::steady_clock::now();
+                            auto waiting_time = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+                            std::cout << "[VPI][DEBUG] Still waiting for client connection (check #" << conn_check_count/5000000
+                                      << ", waiting: " << waiting_time << "s)" << std::endl;
+
+                            // Enhanced connection timeout diagnosis every 10 seconds
+                            if ((now - last_connection_debug) >= std::chrono::seconds(10)) {
+                                std::cout << "[VPI][DEBUG] *** CONNECTION DIAGNOSIS ***" << std::endl;
+                                std::cout << "[VPI][DEBUG]   VPI server: Listening on port 3333" << std::endl;
+                                std::cout << "[VPI][DEBUG]   Waiting time: " << waiting_time << "s" << std::endl;
+                                if (waiting_time > 30) {
+                                    std::cout << "[VPI][DEBUG]   WARNING: Long wait time detected!" << std::endl;
+                                    std::cout << "[VPI][DEBUG]   Check: Is OpenOCD trying to connect to port 3333?" << std::endl;
+                                    std::cout << "[VPI][DEBUG]   Command: lsof -i :3333" << std::endl;
+                                    std::cout << "[VPI][DEBUG]   Alternative: Try manual connection with telnet localhost 3333" << std::endl;
+                                }
+                                std::cout << "[VPI][DEBUG] *** END DIAGNOSIS ***" << std::endl;
+                                last_connection_debug = now;
+                            }
+                        }
+                    }
                 }
 
                 // Update VPI server with current signal values
                 // TDO tri-state: when tdo_en=0 (high-z), JTAG default is 1
                 {
                     uint8_t tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
+                    static int signal_update_count = 0;
+                    if (++signal_update_count % 50000000 == 0 && debug_level >= 2) {
+                        printf("[VPI][DEBUG] VPI Signal Update: tdo=%d, pin3_oen=%d, idcode=0x%08x, active_mode=%d\n",
+                               tdo_value, top->jtag_pin3_oen, top->idcode, top->active_mode);
+                        fflush(stdout);
+                    }
                     vpi_server.update_signals(
                         tdo_value,
                         top->jtag_pin3_oen,
@@ -334,6 +393,10 @@ int main(int argc, char** argv) {
             case SIM_VPI_PROCESSING:
                 // Handle VPI signal processing
                 {
+                    if (debug_level >= 2) {
+                        std::cout << "[VPI][DEBUG] VPI_PROCESSING: Starting JTAG signal processing cycle" << std::endl;
+                    }
+
                     // DEBUG: Log RTL internal signals
                     static uint8_t last_tdo = 0;
                     static uint8_t last_tdo_en = 0;
@@ -359,7 +422,18 @@ int main(int argc, char** argv) {
                     bool process_vpi_this_cycle = (clk_div_counter == 0);
                     clk_div_counter = (clk_div_counter + 1) % 4;
 
+                    if (debug_level >= 2) {
+                        std::cout << "[VPI][DEBUG] VPI_PROCESSING: TCK/CLK ratio cycle " << clk_div_counter
+                                  << ", process_vpi_this_cycle=" << process_vpi_this_cycle
+                                  << ", client_connected=" << client_connected << std::endl;
+                    }
+
                     if (has_pending_signals && process_vpi_this_cycle) {
+                        if (debug_level >= 2) {
+                            std::cout << "[VPI][DEBUG] JTAG Signal Assignment: TMS=" << (int)tms
+                                      << ", TDI=" << (int)tdi << ", mode_sel=" << (int)mode_sel
+                                      << ", tck_pulse=" << tck_pulse << ", tckc_toggle=" << tckc_toggle << std::endl;
+                        }
                         top->jtag_pin1_i = tms;
                         top->jtag_pin2_i = tdi;
                         top->mode_select = mode_sel;
@@ -370,15 +444,16 @@ int main(int argc, char** argv) {
                             // cJTAG mode: toggle TCKC to create one edge
                             static uint8_t tckc_state = 0;
                             tckc_state = !tckc_state;
+                            if (debug_level >= 2) {
+                                printf("[VPI][DEBUG] cJTAG TCKC Toggle: state=%d, pin0=%d\n", tckc_state, tckc_state);
+                                fflush(stdout);
+                            }
                             top->jtag_pin0_i = tckc_state;
-                            top->eval();
 #if ENABLE_FST
                             if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
 #elif ENABLE_VCD
                             if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
 #endif
-                            contextp->timeInc(1);
-
                             // Update TDO after toggle
                             if (mode_sel == 1) {
                                 // cJTAG: TMSC on pin1 (bidirectional)
@@ -387,6 +462,13 @@ int main(int argc, char** argv) {
                                 // JTAG: TDO on pin3
                                 tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
                             }
+
+                            if (debug_level >= 2) {
+                                printf("[VPI][DEBUG] VPI Signal Update (cJTAG TCK): tdo=%d, pin3_oen=%d, idcode=0x%08x, active_mode=%d\n",
+                                       tdo_value, top->jtag_pin3_oen, top->idcode, top->active_mode);
+                                fflush(stdout);
+                            }
+
                             vpi_server.update_signals(
                                 tdo_value,
                                 top->jtag_pin3_oen,
@@ -395,25 +477,24 @@ int main(int argc, char** argv) {
                             );
                         }
                         else if (tck_pulse) {
+                            if (debug_level >= 2) {
+                                printf("[VPI][DEBUG] JTAG TCK Pulse: Starting 0→1→0 sequence\n");
+                                fflush(stdout);
+                            }
                             // JTAG mode: Execute TCK pulse (0→1→0)
                             // TCK pulse: 5ns high, 5ns low (10ns total = 100MHz / 10 = 10MHz JTAG clock)
                             top->jtag_pin0_i = 1;
-                            top->eval();
 #if ENABLE_FST
                             if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
 #elif ENABLE_VCD
                             if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
 #endif
-                            contextp->timeInc(5000);  // 5ns high phase
-
                             top->jtag_pin0_i = 0;
-                            top->eval();
 #if ENABLE_FST
                             if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
 #elif ENABLE_VCD
                             if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
 #endif
-                            contextp->timeInc(5000);  // 5ns low phase
 
                             // Update TDO after pulse
                             if (mode_sel == 1) {
@@ -423,6 +504,18 @@ int main(int argc, char** argv) {
                                 // JTAG: TDO on pin3
                                 tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
                             }
+                            if (debug_level >= 2) {
+                                printf("[VPI][DEBUG] TCK Pulse Complete: mode=%s, tdo_value=%d\n",
+                                       (mode_sel == 1) ? "cJTAG" : "JTAG", tdo_value);
+                                fflush(stdout);
+                            }
+
+                            if (debug_level >= 2) {
+                                printf("[VPI][DEBUG] VPI Signal Update: tdo=%d, pin3_oen=%d, idcode=0x%08x, active_mode=%d\n",
+                                       tdo_value, top->jtag_pin3_oen, top->idcode, top->active_mode);
+                                fflush(stdout);
+                            }
+
                             vpi_server.update_signals(
                                 tdo_value,
                                 top->jtag_pin3_oen,
@@ -467,11 +560,19 @@ int main(int argc, char** argv) {
                 break;
         }
 
+        // Advance CLK time: per half-cycle for system clock
+        contextp->timeInc(CLK_PERIOD/2);
+
+        if (clk_pulse_phase) {
+            cycle_count++;
+        }
+
+        clk_pulse_phase = !clk_pulse_phase;
+
         // Common simulation step operations for all states
         top->eval();
 
         // Dump trace
-
 #if ENABLE_FST
         if (trace) {
             static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
@@ -482,17 +583,59 @@ int main(int argc, char** argv) {
         }
 #endif
 
-        // Advance CLK time: 5ns per half-cycle for 100MHz system clock
-        contextp->timeInc(5000);
-        cycle_count++;
-
         // Exit condition: Ctrl+C or wall-clock timeout (with cycle fallback)
         // Skip timeout check if timeout_seconds is 0 (unlimited)
         if (timeout_seconds > 0) {
-            if (std::chrono::steady_clock::now() >= deadline || cycle_count > max_cycles) {
-                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
+            auto now = std::chrono::steady_clock::now();
+            bool timeout_reached = (now >= deadline || cycle_count > max_cycles);
+
+            if (timeout_reached) {
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+                auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+
+                if (debug_level >= 2) {
+                    printf("\n[VPI][DEBUG] === TIMEOUT ANALYSIS ===\n");
+                    printf("[VPI][DEBUG] Configured timeout: %llu seconds\n", timeout_seconds);
+                    printf("[VPI][DEBUG] Wall-clock elapsed: %lld seconds\n", elapsed);
+                    printf("[VPI][DEBUG] Wall-clock remaining: %lld ms\n", remaining);
+                    printf("[VPI][DEBUG] Cycle count: %llu / %llu (%.1f%%)\n",
+                           cycle_count, max_cycles, (double)cycle_count/max_cycles*100);
+                    printf("[VPI][DEBUG] Current VPI state: %s\n",
+                           (sim_state == SIM_RESET_SYSTEM) ? "RESET_SYSTEM" :
+                           (sim_state == SIM_RESET_JTAG_INIT) ? "RESET_JTAG_INIT" :
+                           (sim_state == SIM_RESET_JTAG_PULSE) ? "RESET_JTAG_PULSE" :
+                           (sim_state == SIM_IDLE) ? "IDLE" :
+                           (sim_state == SIM_VPI_ACTIVE) ? "VPI_ACTIVE" :
+                           (sim_state == SIM_VPI_PROCESSING) ? "VPI_PROCESSING" :
+                           (sim_state == SIM_SHUTDOWN) ? "SHUTDOWN" : "UNKNOWN");
+                    printf("[VPI][DEBUG] Protocol mode: %s\n", top->mode_select ? "cJTAG" : "JTAG");
+                    printf("[VPI][DEBUG] VPI server active: %s\n", "YES");
+                    {
+                        printf("[VPI][DEBUG] VPI server status: Listening on port 3333\n");
+                    }
+                    printf("[VPI][DEBUG] === TIMEOUT ANALYSIS COMPLETE ===\n");
+                }
+
                 std::cout << "\n[SIM] Timeout reached (elapsed " << elapsed << "s, configured " << timeout_seconds << "s)" << std::endl;
                 break;
+            }
+
+            // Enhanced timeout progress monitoring every 2 seconds (2Hz as per optimization)
+            static auto last_timeout_debug = start_time;
+            if (debug_level >= 2 && (now - last_timeout_debug) >= std::chrono::seconds(2)) {
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+                auto remaining_sec = std::chrono::duration_cast<std::chrono::seconds>(deadline - now).count();
+                double cycle_progress = (double)cycle_count / max_cycles * 100;
+                double time_progress = (double)elapsed / timeout_seconds * 100;
+
+                printf("[VPI][DEBUG] Timeout progress: %lld/%llus (%.1f%%), cycles: %.1f%%, state: %s, mode: %s\n",
+                       elapsed, timeout_seconds, time_progress, cycle_progress,
+                       (sim_state == SIM_VPI_ACTIVE) ? "VPI_ACTIVE" :
+                       (sim_state == SIM_VPI_PROCESSING) ? "VPI_PROCESSING" :
+                       (sim_state == SIM_IDLE) ? "IDLE" : "OTHER",
+                       top->mode_select ? "cJTAG" : "JTAG");
+
+                last_timeout_debug = now;
             }
         }
     }

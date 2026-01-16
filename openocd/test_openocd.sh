@@ -72,10 +72,17 @@ echo "  ✓ Configuration file exists"
 
 # Start OpenOCD in background
 echo "[4/5] Starting OpenOCD..."
-LOG_FILE="/tmp/openocd_test_$$.log"
-openocd -f "$CONFIG_FILE" > "$LOG_FILE" 2>&1 &
+
+# Use openocd.log in the project root for persistent logging
+LOG_FILE="openocd.log"
+
+# Set default OPENOCD_DEBUG_FLAGS if not set
+OPENOCD_DEBUG_FLAGS="${OPENOCD_DEBUG_FLAGS:-}"
+
+echo "  OpenOCD command: openocd $OPENOCD_DEBUG_FLAGS -f \"$CONFIG_FILE\" -l \"$LOG_FILE\""
+openocd $OPENOCD_DEBUG_FLAGS -f "$CONFIG_FILE" -l "$LOG_FILE" &
 OPENOCD_PID=$!
-echo "  ✓ OpenOCD started (PID: $OPENOCD_PID)"
+echo "  ✓ OpenOCD started (PID: $OPENOCD_PID), output logged to: $LOG_FILE"
 
 # Wait for OpenOCD to initialize and telnet server to be ready
 sleep 3

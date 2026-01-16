@@ -361,33 +361,80 @@ void JtagVpiServer::send_minimal_response(uint8_t response, uint8_t tdo_val, uin
     resp.mode = mode;
     resp.status = status;
 
-    // Send with blocking retry loop (client socket is non-blocking)
+    // Send with non-blocking approach - avoid blocking/busy-wait that can cause timeouts
     size_t sent_total = 0;
-    while (sent_total < sizeof(resp)) {
+    int retry_count = 0;
+    const int MAX_RETRIES = 1000;  // Prevent infinite busy-wait
+
+    DBG_PRINT(2, "[VPI][DBG] Sending minimal response: resp=0x%02x, tdo=0x%02x, mode=0x%02x, status=0x%02x\n",
+              response, tdo_val, mode, status);
+
+    while (sent_total < sizeof(resp) && retry_count < MAX_RETRIES) {
         ssize_t sent = send(client_sock, ((uint8_t*)&resp) + sent_total,
-                           sizeof(resp) - sent_total, 0);
+                           sizeof(resp) - sent_total, MSG_DONTWAIT);
         if (sent > 0) {
             sent_total += sent;
-        } else if (sent < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-            close_connection();
-            return;
+            DBG_PRINT(2, "[VPI][DBG] Sent %zd bytes, total=%zu/%zu\n", sent, sent_total, sizeof(resp));
+        } else if (sent < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                retry_count++;
+                if (retry_count >= MAX_RETRIES) {
+                    DBG_PRINT(1, "[VPI][WARN] Send timeout after %d retries, but keeping connection alive\n", MAX_RETRIES);
+                    return;  // Don't close connection on timeout
+                }
+                // Small delay to prevent busy-wait CPU consumption
+                usleep(100); // 100 microseconds
+            } else {
+                // Classify different error types
+                const char* error_type = "UNKNOWN";
+                bool should_close = true;
+
+                switch (errno) {
+                    case EPIPE:
+                        error_type = "BROKEN_PIPE";
+                        break;
+                    case ECONNRESET:
+                        error_type = "CONNECTION_RESET";
+                        break;
+                    case ENOTCONN:
+                        error_type = "NOT_CONNECTED";
+                        break;
+                    case EINTR:
+                        error_type = "INTERRUPTED";
+                        should_close = false;  // Recoverable
+                        break;
+                    default:
+                        error_type = "OTHER";
+                        should_close = (errno != EINTR);  // Be more tolerant
+                        break;
+                }
+
+                DBG_PRINT(1, "[VPI][WARN] Send error (%s): errno=%d, %s%s\n",
+                          error_type, errno, strerror(errno), should_close ? ", closing connection" : ", retrying");
+
+                if (should_close) {
+                    close_connection();
+                    return;
+                } else {
+                    retry_count++;
+                    usleep(1000); // 1ms delay for recoverable errors
+                }
+            }
         }
-        // If EAGAIN/EWOULDBLOCK, retry (busy wait for small 4-byte send)
+    }
+
+    if (sent_total < sizeof(resp)) {
+        DBG_PRINT(1, "[VPI][WARN] Incomplete send: %zu/%zu bytes sent, but keeping connection alive\n", sent_total, sizeof(resp));
+        // Don't close connection for incomplete sends - may be recoverable
+    } else {
+        DBG_PRINT(2, "[VPI][DBG] Minimal response sent successfully\n");
+        vpi_minimal_mode = true;
     }
 }
 
 // Handle a full OpenOCD VPI packet
 void JtagVpiServer::process_vpi_packet() {
     uint32_t cmd, length, nb_bits;
-
-    // If we somehow reached here with exactly 8 bytes, force minimal mode using that header
-    if (!vpi_minimal_mode && (minimal_rx_bytes == sizeof(MinimalVpiCmd) || vpi_rx_bytes == sizeof(MinimalVpiCmd))) {
-        if (minimal_rx_bytes == 0 && vpi_rx_bytes == sizeof(MinimalVpiCmd)) {
-            memcpy(&minimal_cmd_rx, &vpi_cmd_rx, sizeof(MinimalVpiCmd));
-            minimal_rx_bytes = sizeof(MinimalVpiCmd);
-        }
-        vpi_minimal_mode = true;
-    }
 
     // In minimal mode, parse the 8-byte MinimalVpiCmd structure
     if (vpi_minimal_mode) {
@@ -694,13 +741,41 @@ void JtagVpiServer::continue_vpi_work() {
                                    sizeof(minimal_cmd_rx) - minimal_rx_bytes, MSG_DONTWAIT);
                 if (ret < 0) {
                     if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                        DBG_PRINT(1, "[VPI][DBG] Recv error in continue_vpi_work (minimal): %s\n", strerror(errno));
-                        close_connection();
+                        // Classify different error types
+                        const char* error_type = "UNKNOWN";
+                        bool should_close = true;
+
+                        switch (errno) {
+                            case ECONNRESET:
+                                error_type = "CONNECTION_RESET";
+                                break;
+                            case ENOTCONN:
+                                error_type = "NOT_CONNECTED";
+                                break;
+                            case EINTR:
+                                error_type = "INTERRUPTED";
+                                should_close = false;  // Recoverable
+                                break;
+                            case ETIMEDOUT:
+                                error_type = "TIMEOUT";
+                                should_close = false;  // May be recoverable
+                                break;
+                            default:
+                                error_type = "OTHER";
+                                break;
+                        }
+
+                        DBG_PRINT(1, "[VPI][WARN] Recv error (%s) in minimal mode: errno=%d, %s%s\n",
+                                  error_type, errno, strerror(errno), should_close ? ", closing connection" : ", continuing");
+
+                        if (should_close) {
+                            close_connection();
+                        }
                     }
                     return;
                 }
                 if (ret == 0) {
-                    DBG_PRINT(1, "[VPI][DBG] Client disconnected in continue_vpi_work (minimal)\n");
+                    DBG_PRINT(1, "[VPI][INFO] Client gracefully disconnected (minimal mode)\n");
                     close_connection();
                     return;
                 }
@@ -779,13 +854,42 @@ void JtagVpiServer::continue_vpi_work() {
                                VPI_PKT_SIZE - vpi_rx_bytes, MSG_DONTWAIT);
             if (ret < 0) {
                 if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                    DBG_PRINT(1, "[VPI][DBG] Recv error in continue_vpi_work: %s\n", strerror(errno));
-                    close_connection();
+                    // Classify different error types
+                    const char* error_type = "UNKNOWN";
+                    bool should_close = true;
+
+                    switch (errno) {
+                        case ECONNRESET:
+                            error_type = "CONNECTION_RESET";
+                            break;
+                        case ENOTCONN:
+                            error_type = "NOT_CONNECTED";
+                            break;
+                        case EINTR:
+                            error_type = "INTERRUPTED";
+                            should_close = false;  // Recoverable
+                            break;
+                        case ETIMEDOUT:
+                            error_type = "TIMEOUT";
+                            should_close = false;  // May be recoverable
+                            break;
+                        default:
+                            error_type = "OTHER";
+                            break;
+                    }
+
+                    DBG_PRINT(1, "[VPI][WARN] Recv error (%s) in full packet mode: errno=%d, %s, rx_bytes=%d/%d%s\n",
+                              error_type, errno, strerror(errno), vpi_rx_bytes, VPI_PKT_SIZE,
+                              should_close ? ", closing connection" : ", continuing");
+
+                    if (should_close) {
+                        close_connection();
+                    }
                 }
                 return;
             }
             if (ret == 0) {
-                DBG_PRINT(1, "[VPI][DBG] Client disconnected in continue_vpi_work\n");
+                DBG_PRINT(1, "[VPI][INFO] Client gracefully disconnected (rx_bytes=%d/%d)\n", vpi_rx_bytes, VPI_PKT_SIZE);
                 close_connection();
                 return;
             }
@@ -866,11 +970,22 @@ void JtagVpiServer::process_command(vpi_cmd* cmd, vpi_resp* resp) {
             break;
     }
 
-    // Send response back to client
+    // Send response back to client (non-blocking with timeout)
     if (send_resp && client_sock >= 0) {
-        ssize_t ret = send(client_sock, resp, sizeof(*resp), 0);  // Blocking send
+        ssize_t ret = send(client_sock, resp, sizeof(*resp), MSG_DONTWAIT);
         if (ret < 0) {
-            close_connection();
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Socket buffer full - try again after a small delay
+                usleep(1000); // 1ms delay
+                ret = send(client_sock, resp, sizeof(*resp), MSG_DONTWAIT);
+                if (ret < 0) {
+                    DBG_PRINT(1, "[VPI][DBG] Send retry failed: %s, closing connection\n", strerror(errno));
+                    close_connection();
+                }
+            } else {
+                DBG_PRINT(1, "[VPI][DBG] Send error: %s, closing connection\n", strerror(errno));
+                close_connection();
+            }
         }
     }
 }
@@ -1023,8 +1138,40 @@ void JtagVpiServer::continue_scan() {
                     scan_state = SCAN_IDLE;
                 }
             } else if (ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                scan_state = SCAN_IDLE;
-                close_connection();
+                // Classify different error types
+                const char* error_type = "UNKNOWN";
+                bool should_close = true;
+
+                switch (errno) {
+                    case EPIPE:
+                        error_type = "BROKEN_PIPE";
+                        break;
+                    case ECONNRESET:
+                        error_type = "CONNECTION_RESET";
+                        break;
+                    case ENOTCONN:
+                        error_type = "NOT_CONNECTED";
+                        break;
+                    case EINTR:
+                        error_type = "INTERRUPTED";
+                        should_close = false;  // Recoverable
+                        break;
+                    default:
+                        error_type = "OTHER";
+                        break;
+                }
+
+                DBG_PRINT(1, "[VPI][WARN] TDO send error (%s) during SCAN: errno=%d, %s, sent=%u/%u bytes%s\n",
+                          error_type, errno, strerror(errno), scan_bytes_sent, scan_num_bytes,
+                          should_close ? ", closing connection" : ", retrying");
+
+                if (should_close) {
+                    scan_state = SCAN_IDLE;
+                    close_connection();
+                } else {
+                    // For recoverable errors, don't change scan state and try again later
+                    usleep(1000); // 1ms delay
+                }
             }
             break;
 
@@ -1035,11 +1182,23 @@ void JtagVpiServer::continue_scan() {
 }
 
 void JtagVpiServer::close_connection() {
-    DBG_PRINT(1, "[VPI][DBG] Closing connection\n");
+    DBG_PRINT(1, "[VPI][INFO] Closing connection (socket=%d, protocol=%s, rx_bytes=%d, scan_state=%d, tx_pending=%s)\n",
+              client_sock,
+              (protocol_mode == PROTO_OPENOCD_VPI) ? "OpenOCD" : (protocol_mode == PROTO_UNKNOWN) ? "Unknown" : "Legacy",
+              vpi_rx_bytes, scan_state, vpi_tx_pending ? "true" : "false");
+
     if (client_sock >= 0) {
+        // Try to get socket error status before closing
+        int socket_error = 0;
+        socklen_t len = sizeof(socket_error);
+        if (getsockopt(client_sock, SOL_SOCKET, SO_ERROR, &socket_error, &len) == 0 && socket_error != 0) {
+            DBG_PRINT(1, "[VPI][INFO] Socket error status: %s\n", strerror(socket_error));
+        }
+
         close(client_sock);
         client_sock = -1;
     }
+
     // Reset protocol mode so next client can be detected correctly
     protocol_mode = PROTO_UNKNOWN;
     vpi_rx_bytes = 0;
@@ -1049,6 +1208,8 @@ void JtagVpiServer::close_connection() {
     scan_state = SCAN_IDLE;
     // Reset TMS sequence state
     tms_seq_active = false;
+
+    DBG_PRINT(1, "[VPI][INFO] Connection cleanup complete, ready for new client\n");
 }
 
 void JtagVpiServer::update_signals(uint8_t tdo, uint32_t idcode, uint8_t mode) {

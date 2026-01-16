@@ -355,6 +355,14 @@ test-jtag: $(BUILD_DIR)/jtag_vpi
 		echo ""; \
 		if [ -x "./openocd/test_openocd.sh" ]; then \
 			echo "Server mode: JTAG (modern jtag_vpi)"; \
+			OPENOCD_TEST_TIMEOUT=$(TEST_TIMEOUT); export OPENOCD_TEST_TIMEOUT; \
+			if [ "$(DEBUG)" = "1" ]; then \
+				OPENOCD_DEBUG_FLAGS="-d2"; export OPENOCD_DEBUG_FLAGS; \
+			elif [ "$(DEBUG)" = "2" ]; then \
+				OPENOCD_DEBUG_FLAGS="-d3"; export OPENOCD_DEBUG_FLAGS; \
+			else \
+				OPENOCD_DEBUG_FLAGS=""; export OPENOCD_DEBUG_FLAGS; \
+			fi; \
 			if ./openocd/test_openocd.sh jtag; then \
 				echo ""; \
 				echo "✓ OpenOCD JTAG test PASSED"; \
@@ -402,6 +410,14 @@ test-cjtag: $(BUILD_DIR)/jtag_vpi
 		echo ""; \
 		if [ -x "./openocd/test_openocd.sh" ]; then \
 			echo "Server mode: cJTAG (modern jtag_vpi)"; \
+			OPENOCD_TEST_TIMEOUT=$(TEST_TIMEOUT); export OPENOCD_TEST_TIMEOUT; \
+			if [ "$(DEBUG)" = "1" ]; then \
+				OPENOCD_DEBUG_FLAGS="-d2"; export OPENOCD_DEBUG_FLAGS; \
+			elif [ "$(DEBUG)" = "2" ]; then \
+				OPENOCD_DEBUG_FLAGS="-d3"; export OPENOCD_DEBUG_FLAGS; \
+			else \
+				OPENOCD_DEBUG_FLAGS=""; export OPENOCD_DEBUG_FLAGS; \
+			fi; \
 			if ./openocd/test_openocd.sh cjtag; then \
 				echo ""; \
 				echo "✓ OpenOCD cJTAG test PASSED"; \
