@@ -18,6 +18,22 @@
 #if ENABLE_VCD
 #include "verilated_vcd_c.h"
 #endif
+
+#include <iostream>
+#include <iomanip>
+
+// Global exit code for VL_USER_FINISH
+static int global_exit_code = 0;
+static Vjtag_vpi_top* global_top = nullptr;
+
+#ifdef VL_USER_FINISH
+// Custom finish handler for VL_USER_FINISH
+void vl_finish(const char* filename, int linenum, const char* hier) {
+    std::cout << "SystemVerilog $finish called from " << filename << ":" << linenum << std::endl;
+    global_exit_code = 1; // Set default error code, will be overridden if needed
+    Verilated::threadContextp()->gotFinish(true);
+}
+#endif
 #include "jtag_vpi_server.h"
 #include <iostream>
 #include <iomanip>
@@ -35,6 +51,7 @@ int main(int argc, char** argv) {
 
     // Create simulator instance
     Vjtag_vpi_top* top = new Vjtag_vpi_top{contextp.get()};
+    global_top = top;  // Set global pointer for VL_USER_FINISH
 
     // Initialize signals
     top->clk = 0;
@@ -180,135 +197,120 @@ int main(int argc, char** argv) {
     uint64_t last_status = 0;
     bool client_connected_once = false;
 
-    // Release reset after a few cycles
-    for (int i = 0; i < 50; i++) {  // Use more cycles for proper clock generation
-        top->clk = (contextp->time() / 5) & 1;  // 50% duty cycle clock
-        top->eval();
+    // Main VPI simulation state machine
+    enum vpi_sim_state_t {
+        SIM_RESET_SYSTEM,      // System reset phase (50 cycles)
+        SIM_RESET_JTAG_INIT,   // Initialize JTAG reset (TMS high for 5 TCK cycles)
+        SIM_RESET_JTAG_PULSE,  // Execute JTAG reset pulses
+        SIM_IDLE,              // Waiting for VPI client connection
+        SIM_VPI_ACTIVE,        // Active VPI communication
+        SIM_VPI_PROCESSING,    // Processing VPI requests
+        SIM_SHUTDOWN           // Shutting down simulation
+    };
 
-    #if ENABLE_FST
-        if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
-    #elif ENABLE_VCD
-        if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
-    #endif
-        contextp->timeInc(1);
-    }
-    top->rst_n = 1;
-    top->jtag_trst_n_i = 1;
+    vpi_sim_state_t sim_state = SIM_RESET_SYSTEM;
+    int reset_cycle_count = 0;
+    int reset_tck_cycles = 0;
+    const int SYSTEM_RESET_CYCLES = 50;
+    const int JTAG_RESET_TCK_CYCLES = 5;
+    const int TCK_CLK_RATIO = 4;  // TCK frequency = CLK frequency / 4
 
-    // After reset release, ensure TAP is in Test-Logic-Reset state
-    // by pulsing TMS high for 5 cycles
-    std::cout << "[SIM] Reset released, initializing TAP to Test-Logic-Reset..." << std::endl;
-    top->jtag_pin1_i = 1;  // TMS high
-    for (int i = 0; i < 5; i++) {
-        top->jtag_pin0_i = 1;  // TCK rising
-        top->clk = (contextp->time() / 5) & 1;  // Time-based 50% duty cycle
-        top->eval();
-    #if ENABLE_FST
-        if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
-    #elif ENABLE_VCD
-        if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
-    #endif
-        contextp->timeInc(1);
+    // TCK generation counters for constant frequency
+    int tck_clk_counter = 0;
+    bool tck_pulse_phase = false;  // false=low, true=high
+    int clk_div_counter = 0;       // For VPI processing timing
 
-        top->jtag_pin0_i = 0;  // TCK falling
-        top->clk = (contextp->time() / 5) & 1;  // Time-based 50% duty cycle
-        top->eval();
-    #if ENABLE_FST
-        if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
-    #elif ENABLE_VCD
-        if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
-    #endif
-        contextp->timeInc(1);
-    }
-    top->jtag_pin1_i = 0;  // TMS back to low
-    std::cout << "[SIM] TAP initialized to Test-Logic-Reset state" << std::endl;
+    // Release reset after initial system reset cycles
+    std::cout << "[SIM] Starting system reset phase..." << std::endl;
 
-    std::cout << "[SIM] Cycle: " << cycle_count
-              << " | IDCODE: 0x" << std::hex << top->idcode
-              << " | Mode: cfg=" << (cjtag_mode ? "cJTAG" : "JTAG")
-              << " active=" << (top->active_mode ? "cJTAG" : "JTAG")
-              << std::dec << std::endl;
-
-    // Main simulation loop
+    // Main simulation loop with integrated reset
     while (!contextp->gotFinish()) {
-        // Generate 50% duty cycle clock based on simulation time
-        // Clock period = 10ns (100MHz), so toggle every 5ns = 5000ps
-        // contextp->time() is in picoseconds (ps) with timescale 1ns/1ps
+        // Generate constant 50% duty cycle CLK (100MHz)
+        // Clock period = 10ns, so toggle every 5000ps
         uint8_t new_clk = (contextp->time() / 5000) & 1;
-
         top->clk = new_clk;
 
-        // On positive clock edge, poll VPI server
-        if (top->clk && (cycle_count % 10) == 0) {
-            vpi_server.poll();
+        // Comprehensive VPI simulation state machine
+        switch (sim_state) {
+            case SIM_RESET_SYSTEM:
+                // Keep system in reset for initial cycles
+                top->rst_n = 0;
+                top->jtag_trst_n_i = 0;
+                top->jtag_pin0_i = 0;  // TCK low
+                top->jtag_pin1_i = 0;  // TMS low
+                top->jtag_pin2_i = 0;  // TDI low
 
-            // Track client connection status
-            if (!client_connected_once && vpi_server.is_client_connected()) {
-                std::cout << "[VPI] ✓ OpenOCD/Client connected successfully!" << std::endl;
-                client_connected_once = true;
-            }
+                reset_cycle_count++;
+                if (reset_cycle_count >= SYSTEM_RESET_CYCLES) {
+                    top->rst_n = 1;
+                    top->jtag_trst_n_i = 1;
+                    sim_state = SIM_RESET_JTAG_INIT;
+                    reset_cycle_count = 0;
+                    std::cout << "[SIM] System reset released, initializing JTAG TAP reset..." << std::endl;
+                }
+                break;
 
-            // VPI server is ready for external client connections
-            // Update VPI server with current signal values
-            // TDO tri-state: when tdo_en=0 (high-z), JTAG default is 1
-            uint8_t tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
-            vpi_server.update_signals(
-                tdo_value,
-                top->jtag_pin3_oen,
-                top->idcode,
-                top->active_mode
-            );
+            case SIM_RESET_JTAG_INIT:
+                // Set TMS high for JTAG reset sequence
+                top->jtag_pin1_i = 1;  // TMS high
+                top->jtag_pin2_i = 0;  // TDI low
+                reset_tck_cycles = 0;
+                sim_state = SIM_RESET_JTAG_PULSE;
+                break;
 
-            // DEBUG: Log RTL internal signals
-            static uint8_t last_tdo = 0;
-            static uint8_t last_tdo_en = 0;
-            static uint8_t last_tap_state = 0xFF;
-            static int signal_log_count = 0;
-            uint8_t tap_state = top->rootp->jtag_vpi_top__DOT__dut__DOT__tap_ctrl__DOT__current_state;
+            case SIM_RESET_JTAG_PULSE:
+                // Generate TCK pulses with TMS high (TCK/CLK = 1/4 ratio)
+                tck_clk_counter++;
+                if (tck_clk_counter >= TCK_CLK_RATIO) {
+                    tck_clk_counter = 0;
 
-            if (signal_log_count < 1 && (top->jtag_pin3_o != last_tdo || top->jtag_pin3_oen != last_tdo_en || tap_state != last_tap_state)) {
-                last_tdo = top->jtag_pin3_o;
-                last_tdo_en = top->jtag_pin3_oen;
-                last_tap_state = tap_state;
-                signal_log_count++;
-            }
-
-            // TCK generation: mutually exclusive modes to avoid conflicts
-            // Either VPI client controls TCK, or automatic test pattern generates it
-
-            // Only override with VPI commands if there's an active client connection
-            uint8_t tms, tdi, mode_sel;
-            bool tck_pulse, tckc_toggle = false;
-            bool client_connected = vpi_server.is_client_connected();
-            bool has_pending_signals = client_connected && vpi_server.get_pending_signals(&tms, &tdi, &mode_sel, &tck_pulse, &tckc_toggle);
-
-            if (has_pending_signals) {
-                top->jtag_pin1_i = tms;
-                top->jtag_pin2_i = tdi;
-                top->mode_select = mode_sel;
-
-                if (tckc_toggle) {
-                    // cJTAG mode: toggle TCKC to create one edge
-                    static uint8_t tckc_state = 0;
-                    tckc_state = !tckc_state;
-                    top->jtag_pin0_i = tckc_state;
-                    top->eval();
-#if ENABLE_FST
-                    if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
-#elif ENABLE_VCD
-                    if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
-#endif
-                    contextp->timeInc(1);
-
-                    // Update TDO after toggle
-                    // In cJTAG mode (mode_sel=1), read TMSC from pin1
-                    if (mode_sel == 1) {
-                        // cJTAG: TMSC on pin1 (bidirectional)
-                        tdo_value = (top->jtag_pin1_oen) ? top->jtag_pin1_o : 1;
+                    if (!tck_pulse_phase) {
+                        // TCK rising edge
+                        top->jtag_pin0_i = 1;
+                        tck_pulse_phase = true;
                     } else {
-                        // JTAG: TDO on pin3
-                        tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
+                        // TCK falling edge
+                        top->jtag_pin0_i = 0;
+                        tck_pulse_phase = false;
+                        reset_tck_cycles++;
+
+                        if (reset_tck_cycles >= JTAG_RESET_TCK_CYCLES) {
+                            top->jtag_pin1_i = 0;  // TMS back to low
+                            sim_state = SIM_IDLE;
+                            std::cout << "[SIM] JTAG TAP reset complete, entering idle state" << std::endl;
+                            std::cout << "[SIM] Cycle: " << cycle_count
+                                      << " | IDCODE: 0x" << std::hex << top->idcode
+                                      << " | Mode: cfg=" << (cjtag_mode ? "cJTAG" : "JTAG")
+                                      << " active=" << (top->active_mode ? "cJTAG" : "JTAG")
+                                      << std::dec << std::endl;
+                        }
                     }
+                }
+                break;
+
+            case SIM_IDLE:
+                // Idle state: wait for VPI activity or handle background tasks
+                vpi_server.poll();
+
+                // Check if VPI server becomes active (has pending operations)
+                uint8_t tms, tdi, mode_sel;
+                bool tck_pulse;
+                if (vpi_server.get_pending_signals(&tms, &tdi, &mode_sel, &tck_pulse)) {
+                    sim_state = SIM_VPI_ACTIVE;
+                }
+                break;
+
+            case SIM_VPI_ACTIVE:
+                // Track client connection status
+                if (!client_connected_once && vpi_server.is_client_connected()) {
+                    std::cout << "[VPI] ✓ OpenOCD/Client connected successfully!" << std::endl;
+                    client_connected_once = true;
+                }
+
+                // Update VPI server with current signal values
+                // TDO tri-state: when tdo_en=0 (high-z), JTAG default is 1
+                {
+                    uint8_t tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
                     vpi_server.update_signals(
                         tdo_value,
                         top->jtag_pin3_oen,
@@ -316,66 +318,156 @@ int main(int argc, char** argv) {
                         top->active_mode
                     );
                 }
-                else if (tck_pulse) {
-                    // JTAG mode: Execute TCK pulse (0→1→0)
-                    top->jtag_pin0_i = 1;
-                    top->eval();
-#if ENABLE_FST
-                    if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
-#elif ENABLE_VCD
-                    if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
-#endif
-                    contextp->timeInc(1);
 
-                    top->jtag_pin0_i = 0;
-                    top->eval();
-#if ENABLE_FST
-                    if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
-#elif ENABLE_VCD
-                    if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
-#endif
-                    contextp->timeInc(1);
+                // Check for VPI signals and transition to processing
+                {
+                    uint8_t tms, tdi, mode_sel;
+                    bool tck_pulse, tckc_toggle = false;
+                    bool client_connected = vpi_server.is_client_connected();
 
-                    // Update TDO after pulse
-                    // In cJTAG mode (mode_sel=1), read TMSC from pin1
-                    // In JTAG mode (mode_sel=0), read TDO from pin3
-                    if (mode_sel == 1) {
-                        // cJTAG: TMSC on pin1 (bidirectional)
-                        tdo_value = (top->jtag_pin1_oen) ? top->jtag_pin1_o : 1;
-                    } else {
-                        // JTAG: TDO on pin3
-                        tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
+                    if (client_connected && vpi_server.get_pending_signals(&tms, &tdi, &mode_sel, &tck_pulse, &tckc_toggle)) {
+                        sim_state = SIM_VPI_PROCESSING;
                     }
-                    vpi_server.update_signals(
-                        tdo_value,
-                        top->jtag_pin3_oen,
-                        top->idcode,
-                        top->active_mode
-                    );
                 }
-            } else {
-                // No VPI client connected: Keep pins in stable state
-                // TCK=0 (idle), TMS=0, TDI=0 for proper JTAG idle state
-                // This ensures clean waveforms when VPI client connects
-                top->jtag_pin0_i = 0;  // TCK idle (low)
-                top->jtag_pin1_i = 0;  // TMS=0 (stay in current state)
-                top->jtag_pin2_i = 0;  // TDI=0 (no data input)
+                break;
 
-                // Keep mode_select as set by command-line flag
-                // (don't change it during simulation)
-            }
+            case SIM_VPI_PROCESSING:
+                // Handle VPI signal processing
+                {
+                    // DEBUG: Log RTL internal signals
+                    static uint8_t last_tdo = 0;
+                    static uint8_t last_tdo_en = 0;
+                    static uint8_t last_tap_state = 0xFF;
+                    static int signal_log_count = 0;
+                    uint8_t tap_state = top->rootp->jtag_vpi_top__DOT__dut__DOT__tap_ctrl__DOT__current_state;
 
-            // Print status every 20000000 cycles (20M cycles = less frequent logging)
-            if (verbose && (cycle_count - last_status) >= 20000000) {
-                std::cout << "[SIM] Cycle: " << cycle_count
-                          << " | IDCODE: 0x" << std::hex << top->idcode
-                          << " | Mode: cfg=" << (cjtag_mode ? "cJTAG" : "JTAG")
-                          << " active=" << (top->active_mode ? "cJTAG" : "JTAG")
-                          << std::dec << std::endl;
-                last_status = cycle_count;
-            }
+                    if (signal_log_count < 1 && (top->jtag_pin3_o != last_tdo || top->jtag_pin3_oen != last_tdo_en || tap_state != last_tap_state)) {
+                        last_tdo = top->jtag_pin3_o;
+                        last_tdo_en = top->jtag_pin3_oen;
+                        last_tap_state = tap_state;
+                        signal_log_count++;
+                    }
+
+                    // TCK generation with constant frequency ratio (TCK/CLK = 1/4)
+                    uint8_t tms, tdi, mode_sel;
+                    bool tck_pulse, tckc_toggle = false;
+                    bool client_connected = vpi_server.is_client_connected();
+                    bool has_pending_signals = client_connected && vpi_server.get_pending_signals(&tms, &tdi, &mode_sel, &tck_pulse, &tckc_toggle);
+
+                    // TCK/CLK = 1/4 ratio control: Only process VPI requests every 4 CLK cycles
+                    static int clk_div_counter = 0;
+                    bool process_vpi_this_cycle = (clk_div_counter == 0);
+                    clk_div_counter = (clk_div_counter + 1) % 4;
+
+                    if (has_pending_signals && process_vpi_this_cycle) {
+                        top->jtag_pin1_i = tms;
+                        top->jtag_pin2_i = tdi;
+                        top->mode_select = mode_sel;
+
+                        uint8_t tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
+
+                        if (tckc_toggle) {
+                            // cJTAG mode: toggle TCKC to create one edge
+                            static uint8_t tckc_state = 0;
+                            tckc_state = !tckc_state;
+                            top->jtag_pin0_i = tckc_state;
+                            top->eval();
+#if ENABLE_FST
+                            if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+#elif ENABLE_VCD
+                            if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
+#endif
+                            contextp->timeInc(1);
+
+                            // Update TDO after toggle
+                            if (mode_sel == 1) {
+                                // cJTAG: TMSC on pin1 (bidirectional)
+                                tdo_value = (top->jtag_pin1_oen) ? top->jtag_pin1_o : 1;
+                            } else {
+                                // JTAG: TDO on pin3
+                                tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
+                            }
+                            vpi_server.update_signals(
+                                tdo_value,
+                                top->jtag_pin3_oen,
+                                top->idcode,
+                                top->active_mode
+                            );
+                        }
+                        else if (tck_pulse) {
+                            // JTAG mode: Execute TCK pulse (0→1→0)
+                            // TCK pulse: 5ns high, 5ns low (10ns total = 100MHz / 10 = 10MHz JTAG clock)
+                            top->jtag_pin0_i = 1;
+                            top->eval();
+#if ENABLE_FST
+                            if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+#elif ENABLE_VCD
+                            if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
+#endif
+                            contextp->timeInc(5000);  // 5ns high phase
+
+                            top->jtag_pin0_i = 0;
+                            top->eval();
+#if ENABLE_FST
+                            if (trace) static_cast<VerilatedFstC*>(trace)->dump(contextp->time());
+#elif ENABLE_VCD
+                            if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
+#endif
+                            contextp->timeInc(5000);  // 5ns low phase
+
+                            // Update TDO after pulse
+                            if (mode_sel == 1) {
+                                // cJTAG: TMSC on pin1 (bidirectional)
+                                tdo_value = (top->jtag_pin1_oen) ? top->jtag_pin1_o : 1;
+                            } else {
+                                // JTAG: TDO on pin3
+                                tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
+                            }
+                            vpi_server.update_signals(
+                                tdo_value,
+                                top->jtag_pin3_oen,
+                                top->idcode,
+                                top->active_mode
+                            );
+                        }
+
+                        // Return to VPI_ACTIVE for next signal check
+                        sim_state = SIM_VPI_ACTIVE;
+                    } else {
+                        // No VPI client connected or no pending signals: Keep pins in stable state
+                        top->jtag_pin0_i = 0;  // TCK idle (low)
+                        top->jtag_pin1_i = 0;  // TMS=0 (stay in current state)
+                        top->jtag_pin2_i = 0;  // TDI=0 (no data input)
+
+                        // Return to VPI_ACTIVE for continued polling
+                        sim_state = SIM_VPI_ACTIVE;
+                    }
+
+                    // Print status every 20000000 cycles (20M cycles = less frequent logging)
+                    if (verbose && (cycle_count - last_status) >= 20000000) {
+                        std::cout << "[SIM] Cycle: " << cycle_count
+                                  << " | IDCODE: 0x" << std::hex << top->idcode
+                                  << " | Mode: cfg=" << (cjtag_mode ? "cJTAG" : "JTAG")
+                                  << " active=" << (top->active_mode ? "cJTAG" : "JTAG")
+                                  << std::dec << std::endl;
+                        last_status = cycle_count;
+                    }
+                }
+                break;
+
+            case SIM_SHUTDOWN:
+                // Shutdown state - cleanup and exit
+                contextp->gotFinish(true);
+                break;
+
+            default:
+                // Unknown state - reset to idle
+                std::cout << "[SIM] Warning: Unknown state " << sim_state << ", resetting to idle" << std::endl;
+                sim_state = SIM_IDLE;
+                break;
         }
 
+        // Common simulation step operations for all states
         top->eval();
 
         // Dump trace
@@ -390,8 +482,8 @@ int main(int argc, char** argv) {
         }
 #endif
 
-        // Advance time
-        contextp->timeInc(1);
+        // Advance CLK time: 5ns per half-cycle for 100MHz system clock
+        contextp->timeInc(5000);
         cycle_count++;
 
         // Exit condition: Ctrl+C or wall-clock timeout (with cycle fallback)
@@ -422,9 +514,12 @@ int main(int argc, char** argv) {
     top->final();
     delete top;
 
+    // VL_USER_FINISH: Exit code handled by custom finish handler
+    int exit_code = global_exit_code;
+
     std::cout << "\n=== VPI Simulation Complete ===" << std::endl;
     std::cout << "Total cycles: " << cycle_count << std::endl;
     std::cout << "Simulation time: " << contextp->time() << " ns" << std::endl;
 
-    return 0;
+    return exit_code;
 }

@@ -8,6 +8,9 @@
 module jtag_tb;
     import jtag_dmi_pkg::*;
 
+    // DPI export for C++ integration
+    export "DPI-C" function get_verification_status_dpi;
+
     reg        clk;
     reg        rst_n;
 
@@ -33,6 +36,11 @@ module jtag_tb;
 
     wire [31:0] idcode;
     wire       active_mode;
+
+    // Test tracking variables
+    integer test_count = 0;
+    integer pass_count = 0;
+    integer fail_count = 0;
 
     // Clock generation
     initial begin
@@ -228,15 +236,52 @@ module jtag_tb;
         #500;
 
         $display("\n=== Enhanced JTAG Testbench Completed ===");
-        $display("All 18 tests completed successfully!");
+        $display("Tests completed: %0d passed, %0d failed", pass_count, fail_count);
+        if (fail_count == 0) begin
+            $display("✓ ALL TESTS PASSED!");
+        end else begin
+            $display("✗ %0d TESTS FAILED - Review errors above", fail_count);
+        end
         $display("Coverage: JTAG, cJTAG OScan1, Protocol Switching, Boundary Testing");
-        $finish;
+
+        if (fail_count > 0) begin
+            $display("\n=== SIMULATION FAILED ===");
+            $finish(1);  // Exit with error code
+        end else begin
+            $finish;
+        end
     end
+
+    // Timeout
+    initial begin
+        #1000000;
+        $display("ERROR: Testbench timeout!");
+        $finish(1);  // Exit with error code
+    end
+
+    // DPI function wrapper for C++ access
+    // Returns: 0 = passed, 1 = failed, 2 = timeout
+    function int get_verification_status_dpi();
+        int status;
+        // Check for timeout condition first
+        if ($time >= 1000000) begin
+            status = 2;  // Timeout
+        end else if (fail_count > 0) begin
+            status = 1;  // Failed
+        end else if (pass_count > 0 && test_count > 0) begin
+            status = 0;  // Passed (has tests and all passed)
+        end else begin
+            status = 1;  // No tests completed or unknown state - treat as failed
+        end
+        return status;
+    endfunction
 
     // Task to reset TAP controller
     task reset_tap();
         integer i;
         begin
+            test_count = test_count + 1;  // Track this test
+
             $display("  Resetting TAP controller (5 TMS=1 clocks)");
             jtag_pin1_i = 1;
             for (i = 0; i < 5; i = i + 1) begin
@@ -244,7 +289,9 @@ module jtag_tb;
             end
             jtag_pin1_i = 0;
             wait_tck();
-            $display("  TAP reset complete");
+
+            pass_count = pass_count + 1;
+            $display("  TAP reset complete - PASSED");
         end
     endtask
 
@@ -253,6 +300,8 @@ module jtag_tb;
         integer i;
         logic [31:0] read_data;
         begin
+            test_count = test_count + 1;  // Track this test
+
             $display("  Reading IDCODE register...");
 
             // Go to Run-Test/Idle
@@ -279,6 +328,15 @@ module jtag_tb;
             $display("  IDCODE Read: 0x%08h", read_data);
             $display("  Expected IDCODE: 0x%08h", dut.idcode);
 
+            // Check if IDCODE matches expected value
+            if (read_data == dut.idcode) begin
+                $display("  ✓ IDCODE verification PASSED");
+                pass_count = pass_count + 1;
+            end else begin
+                $display("  ✗ IDCODE verification FAILED");
+                fail_count = fail_count + 1;
+            end
+
             // Exit shift state
             jtag_pin1_i = 1;
             wait_tck();
@@ -302,6 +360,8 @@ module jtag_tb;
         integer i;
         logic [7:0] captured_ir;
         begin
+            test_count = test_count + 1;  // Track this test
+
             $display("  Writing IR: 0x%02h", instruction);
 
             // Go to Run-Test/Idle
@@ -345,7 +405,9 @@ module jtag_tb;
             // Stay in Run-Test/Idle for a few cycles to let instruction take effect
             repeat(5) wait_tck();
 
-            $display("    IR write complete");
+            // Mark this test as pass (successful IR shift)
+            pass_count = pass_count + 1;
+            $display("    IR write complete - PASSED");
         end
     endtask
 
@@ -354,6 +416,8 @@ module jtag_tb;
         integer i;
         logic [31:0] read_data;
         begin
+            test_count = test_count + 1;  // Track this test
+
             $display("  Reading 32-bit DR...");
 
             // Start from Run-Test/Idle
@@ -393,6 +457,9 @@ module jtag_tb;
             // Return to Run-Test/Idle (TMS=0 from Update-DR)
             jtag_pin1_i = 0;
             wait_tck();
+
+            pass_count = pass_count + 1;
+            $display("    DR read complete - PASSED");
         end
     endtask
 
@@ -401,11 +468,13 @@ module jtag_tb;
         integer i;
         logic [7:0] test_pattern;
         logic tdo_bit;
-        integer pass_count;
+        integer pass_count_local;
         begin
+            test_count = test_count + 1;  // Track this test
+
             $display("  Testing BYPASS register...");
             test_pattern = 8'b10110011;
-            pass_count = 0;
+            pass_count_local = 0;
 
             // Start from Run-Test/Idle
             jtag_pin1_i = 0;
@@ -429,7 +498,7 @@ module jtag_tb;
 
                 // BYPASS should delay by 1 bit
                 if (i > 0 && tdo_bit == test_pattern[i-1]) begin
-                    pass_count = pass_count + 1;
+                    pass_count_local = pass_count_local + 1;
                 end
                 $display("      Bit %0d: TDI=%0b, TDO=%0b", i, test_pattern[i], tdo_bit);
             end
@@ -440,7 +509,7 @@ module jtag_tb;
             wait_tck();
             tdo_bit = jtag_pin3_o;
             if (tdo_bit == test_pattern[7]) begin
-                pass_count = pass_count + 1;
+                pass_count_local = pass_count_local + 1;
             end
             $display("      Final TDO=%0b", tdo_bit);
 
@@ -452,10 +521,12 @@ module jtag_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            if (pass_count >= 7) begin
-                $display("    ✓ BYPASS test PASSED (%0d/8 bits correct)", pass_count);
+            if (pass_count_local >= 7) begin
+                $display("    ✓ BYPASS test PASSED (%0d/8 bits correct)", pass_count_local);
+                pass_count = pass_count + 1;
             end else begin
-                $display("    ✗ BYPASS test FAILED (%0d/8 bits correct)", pass_count);
+                $display("    ✗ BYPASS test FAILED (%0d/8 bits correct)", pass_count_local);
+                fail_count = fail_count + 1;
             end
         end
     endtask

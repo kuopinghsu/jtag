@@ -18,6 +18,42 @@
 #include "verilated_vcd_c.h"
 #endif
 #include <iostream>
+
+// DPI function declarations for verification status
+extern "C" int get_verification_status_dpi();
+#include "svdpi.h"  // For DPI scope management
+
+// Global exit code for VL_USER_FINISH
+static int global_exit_code = 0;
+static Vjtag_tb* global_top = nullptr;
+
+// Define custom finish handler (VL_USER_FINISH=1 defined via compiler flag)
+void vl_finish(const char* filename, int linenum, const char* hier) {
+    // SystemVerilog $finish() was called - capture this event
+    (void)hier;
+    std::cout << "SystemVerilog $finish called from " << filename << ":" << linenum << std::endl;
+
+    // Get verification status from SystemVerilog DPI function
+    int status = 1;  // Default to failed
+    if (global_top != nullptr) {
+        try {
+            // Set proper SystemVerilog scope context for DPI call
+            svScope scope = svGetScopeFromName("TOP.jtag_tb");
+            if (scope) {
+                svSetScope(scope);
+            }
+            // Call DPI function to get verification status
+            status = get_verification_status_dpi();
+            std::cout << "Testbench exit status: " << status << " (0=passed, 1=failed, 2=timeout)" << std::endl;
+        } catch (const std::exception& e) {
+            std::cout << "Warning: Unable to get verification status from testbench: " << e.what() << std::endl;
+            status = 1;  // Default to failed on error
+        }
+    }
+
+    global_exit_code = status;  // Use status from DPI function
+    Verilated::threadContextp()->gotFinish(true);
+}
 #include <iomanip>
 
 int main(int argc, char** argv) {
@@ -27,6 +63,9 @@ int main(int argc, char** argv) {
 
     // Create simulator instance
     Vjtag_tb* top = new Vjtag_tb{contextp.get()};
+
+    // Set global pointer for VL_USER_FINISH handler
+    global_top = top;
 
     // Enable waveform tracing if requested
     void* trace = NULL;
@@ -71,6 +110,21 @@ int main(int argc, char** argv) {
         contextp->timeInc(1);
     }
 
+    // Capture exit code from VL_USER_FINISH handler
+    int exit_code = global_exit_code;  // Use global from custom finish handler
+    if (contextp->gotFinish()) {
+        std::cout << "\nSimulation completed with exit code: " << exit_code << std::endl;
+        if (exit_code == 0) {
+            std::cout << "✓ All tests PASSED" << std::endl;
+        } else if (exit_code == 1) {
+            std::cout << "✗ Some tests FAILED" << std::endl;
+        } else if (exit_code == 2) {
+            std::cout << "⚠ Simulation TIMEOUT" << std::endl;
+        } else {
+            std::cout << "? Unknown exit condition" << std::endl;
+        }
+    }
+
     // Cleanup
     if (trace) {
 #if ENABLE_FST
@@ -85,7 +139,16 @@ int main(int argc, char** argv) {
     top->final();
     delete top;
 
-    std::cout << "\n=== Simulation Complete ===" << std::endl;
+    // Show clear test result status instead of generic completion message
+    if (exit_code == 0) {
+        std::cout << "\n✓ SIMULATION PASSED" << std::endl;
+    } else if (exit_code == 1) {
+        std::cout << "\n✗ SIMULATION FAILED" << std::endl;
+    } else if (exit_code == 2) {
+        std::cout << "\n⏰ SIMULATION TIMEOUT" << std::endl;
+    } else {
+        std::cout << "\n❌ SIMULATION ERROR (code: " << exit_code << ")" << std::endl;
+    }
     std::cout << "Total simulation time: " << contextp->time() << " ns" << std::endl;
     std::cout << "\nFor VPI/OpenOCD integration, the simulation provides:" << std::endl;
     std::cout << "  - Standard JTAG interface verification via testbench" << std::endl;
@@ -93,5 +156,5 @@ int main(int argc, char** argv) {
     std::cout << "  - IDCODE read operations" << std::endl;
     std::cout << "\nVPI clients can connect to dedicated VPI testbench (see documentation)" << std::endl;
 
-    return 0;
+    return exit_code;
 }

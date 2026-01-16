@@ -55,6 +55,7 @@ module jtag_dtm (
 
     // Bypass register
     logic bypass_reg;
+    logic bypass_tdo_reg;  // Holds the value to be output on TDO
 
     // Test pattern register for scan chain verification
     // Provides predictable 8-bit patterns for TDI/TDO integrity testing
@@ -64,6 +65,9 @@ module jtag_dtm (
     // Current operation tracking
     logic dmi_pending;
     logic [1:0] last_response;  // dmi_resp_e
+
+    // Bypass register - need to preserve current value for TDO during shift
+    logic bypass_tdo_value;
 
     // IDCODE assignment
     assign idcode = IDCODE_VALUE;
@@ -146,6 +150,7 @@ module jtag_dtm (
                     end
                     IR_BYPASS: begin
                         bypass_reg <= 1'b0;
+                        bypass_tdo_reg <= 1'b0;  // Capture 0 for TDO during BYPASS
                         test_pattern_shift_reg <= test_pattern_reg;  // Load test pattern for scan
 `ifdef VERBOSE
                         if (`VERBOSE) $display("[DTM] BYPASS capture: loaded 0");
@@ -172,6 +177,8 @@ module jtag_dtm (
                         dmi_shift_reg <= {tdi, dmi_shift_reg[40:1]};
                     end
                     IR_BYPASS: begin
+                        // BYPASS is a simple shift register: TDO shows current bit, TDI shifts in
+                        bypass_tdo_reg <= bypass_reg;  // Save current bit for TDO
                         bypass_reg <= tdi;
                         test_pattern_shift_reg <= {tdi, test_pattern_shift_reg[7:1]};  // Shift test pattern
                     end
@@ -214,7 +221,7 @@ module jtag_dtm (
             IR_IDCODE: tdo = idcode_shift_reg[0];               // Use IDCODE data for IDCODE
             IR_DTMCS:  tdo = idcode_shift_reg[0];               // Use DTMCS data for DTMCS
             IR_DMI:    tdo = dmi_shift_reg[0];
-            IR_BYPASS: tdo = test_pattern_shift_reg[0];
+            IR_BYPASS: tdo = bypass_tdo_reg;                    // Use bypass TDO register for proper timing
             default:   tdo = test_pattern_shift_reg[0];
         endcase
     end

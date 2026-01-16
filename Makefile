@@ -43,7 +43,7 @@ ENABLE_VCD_FLAG := $(if $(filter vcd,$(WAVE_FORMAT)),1,0)
 # VERBOSE SystemVerilog debug flag - enabled when VERBOSE != 0
 VERBOSE ?= 0
 VERBOSE_FLAG := $(if $(filter-out 0,$(VERBOSE)),+define+VERBOSE=1,)
-VERILATOR_CPPFLAGS := -CFLAGS "-DENABLE_FST=$(ENABLE_FST_FLAG) -DENABLE_VCD=$(ENABLE_VCD_FLAG)"
+VERILATOR_CPPFLAGS := -CFLAGS "-DENABLE_FST=$(ENABLE_FST_FLAG) -DENABLE_VCD=$(ENABLE_VCD_FLAG) -DVL_USER_FINISH=1"
 VERILATOR_FLAGS := --cc --exe --build -j 4 $(VERILATOR_TRACE_FLAG) --timescale 1ns/1ps \
 				   --top-module jtag_tb --timing -Wno-fatal $(VERILATOR_CPPFLAGS) $(VERBOSE_FLAG)
 VERILATOR_SYS_FLAGS := --cc --exe --build -j 4 $(VERILATOR_TRACE_FLAG) --timescale 1ns/1ps \

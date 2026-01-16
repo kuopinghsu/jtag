@@ -5,6 +5,7 @@
 
 #include "Vsystem_tb.h"
 #include "verilated.h"
+#include "svdpi.h"  // For DPI scope management
 #ifndef ENABLE_FST
 #define ENABLE_FST 0
 #endif
@@ -14,6 +15,39 @@
 #include <iostream>
 #include <iomanip>
 
+// DPI function declaration for verification status
+extern "C" int get_verification_status_dpi();
+
+// Global exit code for VL_USER_FINISH
+static int global_exit_code = 0;
+static Vsystem_tb* global_top = nullptr;
+
+#ifdef VL_USER_FINISH
+// Custom finish handler for VL_USER_FINISH
+void vl_finish(const char* filename, int linenum, const char* hier) {
+    std::cout << "SystemVerilog $finish called from " << filename << ":" << linenum << std::endl;
+
+    int status = 1;  // Default to failed
+    if (global_top != nullptr) {
+        try {
+            // Set proper SystemVerilog scope context for DPI call
+            svScope scope = svGetScopeFromName("TOP.system_tb");
+            if (scope) {
+                svSetScope(scope);
+            }
+            status = get_verification_status_dpi();
+            std::cout << "Testbench exit status: " << status << " (0=passed, 1=failed, 2=timeout)" << std::endl;
+        } catch (const std::exception& e) {
+            std::cout << "Warning: Unable to get verification status: " << e.what() << std::endl;
+            status = 1;  // Default to failed on error
+        }
+    }
+
+    global_exit_code = status;
+    Verilated::threadContextp()->gotFinish(true);
+}
+#endif
+
 int main(int argc, char** argv) {
     // Create context
     const std::unique_ptr<VerilatedContext> contextp{new VerilatedContext};
@@ -21,6 +55,7 @@ int main(int argc, char** argv) {
 
     // Create simulator instance
     Vsystem_tb* top = new Vsystem_tb{contextp.get()};
+    global_top = top;  // Set global pointer for VL_USER_FINISH
 
     // Enable waveform tracing if requested
 
@@ -56,7 +91,19 @@ int main(int argc, char** argv) {
         contextp->timeInc(1);
     }
 
-    std::cout << "\n=== Simulation Complete ===" << std::endl;
+    // VL_USER_FINISH: Exit code handled by custom finish handler
+    int exit_code = global_exit_code;
+
+    // Show clear test result status instead of generic completion message
+    if (exit_code == 0) {
+        std::cout << "\n✓ SIMULATION PASSED" << std::endl;
+    } else if (exit_code == 1) {
+        std::cout << "\n✗ SIMULATION FAILED" << std::endl;
+    } else if (exit_code == 2) {
+        std::cout << "\n⏰ SIMULATION TIMEOUT" << std::endl;
+    } else {
+        std::cout << "\n❌ SIMULATION ERROR (code: " << exit_code << ")" << std::endl;
+    }
     std::cout << "Total simulation time: " << contextp->time() << " ns" << std::endl;
 
     // Cleanup
@@ -71,5 +118,5 @@ int main(int argc, char** argv) {
     top->final();
     delete top;
 
-    return 0;
+    return exit_code;
 }

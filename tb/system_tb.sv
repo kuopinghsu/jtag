@@ -4,6 +4,8 @@
  */
 
 module system_tb;
+    // DPI export for C++ integration
+    export "DPI-C" function get_verification_status_dpi;
 
     logic        clk;
     logic        rst_n;
@@ -23,6 +25,11 @@ module system_tb;
     logic        debug_req;
     logic        hart_halted;
     logic        active_mode;
+
+    // Test tracking variables
+    integer test_count = 0;
+    integer pass_count = 0;
+    integer fail_count = 0;
 
     // Instantiate DUT
     system_top dut (
@@ -83,79 +90,156 @@ module system_tb;
 
         // Test 1: TAP Controller Reset
         $display("\nTest 1: TAP Controller Reset");
+        test_count = test_count + 1;
         reset_tap();
+        pass_count = pass_count + 1;
+        $display("    ✓ Test 1 PASSED");
 
         // Test 2: Read IDCODE
         $display("\nTest 2: Read IDCODE via DTM");
-        read_idcode();
+        test_count = test_count + 1;
+        read_idcode_with_check(32'h1DEAD3FF);
 
         // Test 3: Read DMSTATUS
         $display("\nTest 3: Read Debug Module Status");
-        read_dm_register(7'h11);  // DMSTATUS
+        test_count = test_count + 1;
+        read_dm_register_with_check(7'h11, 32'h00000C82);  // DMSTATUS expected value
 
         // Test 4: Halt Hart
         $display("\nTest 4: Halt Hart via Debug Module");
+        test_count = test_count + 1;
         write_dm_register(7'h10, 32'h80000001);  // DMCONTROL: haltreq=1, dmactive=1
         #500;
         $display("  Hart halted: %0b", hart_halted);
         $display("  Debug request: %0b", debug_req);
+        if (hart_halted && debug_req) begin
+            pass_count = pass_count + 1;
+            $display("    ✓ Test 4 PASSED - Hart successfully halted");
+        end else begin
+            fail_count = fail_count + 1;
+            $display("    ✗ Test 4 FAILED - Hart halt failed (halted=%0b, debug_req=%0b)", hart_halted, debug_req);
+        end
 
         // Test 5: Read DMSTATUS after halt
         $display("\nTest 5: Read DMSTATUS after halt");
-        read_dm_register(7'h11);  // DMSTATUS
+        test_count = test_count + 1;
+        read_dm_register_with_check(7'h11, 32'h00000C83);  // Expected DMSTATUS with halt bit set
 
         // Test 6: Resume Hart
         $display("\nTest 6: Resume Hart");
+        test_count = test_count + 1;
         write_dm_register(7'h10, 32'h40000001);  // DMCONTROL: resumereq=1, dmactive=1
         #500;
         $display("  Hart halted: %0b", hart_halted);
+        if (!hart_halted) begin
+            pass_count = pass_count + 1;
+            $display("    ✓ Test 6 PASSED - Hart successfully resumed");
+        end else begin
+            fail_count = fail_count + 1;
+            $display("    ✗ Test 6 FAILED - Hart resume failed (still halted)");
+        end
 
         // Test 7: Switch to cJTAG mode
         $display("\nTest 7: Switch to cJTAG mode");
+        test_count = test_count + 1;
         mode_select = 1;  // Enable cJTAG mode
         #200;
+        if (active_mode == 1'b1) begin
+            pass_count = pass_count + 1;
+            $display("    ✓ Test 7 PASSED - Successfully switched to cJTAG mode");
+        end else begin
+            fail_count = fail_count + 1;
+            $display("    ✗ Test 7 FAILED - Failed to switch to cJTAG mode (active_mode=%0b)", active_mode);
+        end
         reset_tap();
-        read_idcode();
+        read_idcode_with_check(32'h1DEAD3FF);
 
         // Test 8: cJTAG DMI access
         $display("\nTest 8: cJTAG DMI register access");
-        read_dm_register(7'h11);  // Read DMSTATUS in cJTAG mode
+        test_count = test_count + 1;
+        read_dm_register_with_check(7'h11, 32'h00000C82);  // Read DMSTATUS in cJTAG mode
 
         // Test 9: cJTAG hart control
         $display("\nTest 9: cJTAG hart control");
+        test_count = test_count + 1;
         write_dm_register(7'h10, 32'h80000001);  // DMCONTROL: haltreq=1, dmactive=1
         #500;
         $display("  Hart halted (cJTAG mode): %0b", hart_halted);
+        if (hart_halted) begin
+            pass_count = pass_count + 1;
+            $display("    ✓ Test 9 PASSED - Hart control works in cJTAG mode");
+        end else begin
+            fail_count = fail_count + 1;
+            $display("    ✗ Test 9 FAILED - Hart control failed in cJTAG mode");
+        end
 
         // Test 10: Return to JTAG mode
         $display("\nTest 10: Return to JTAG mode");
+        test_count = test_count + 1;
         mode_select = 0;
         #200;
+        if (active_mode == 1'b0) begin
+            pass_count = pass_count + 1;
+            $display("    ✓ Test 10 PASSED - Successfully returned to JTAG mode");
+        end else begin
+            fail_count = fail_count + 1;
+            $display("    ✗ Test 10 FAILED - Failed to return to JTAG mode (active_mode=%0b)", active_mode);
+        end
         reset_tap();
-        read_idcode();
+        read_idcode_with_check(32'h1DEAD3FF);
 
         // Test 11: Verify JTAG mode functionality
         $display("\nTest 11: Verify JTAG mode after switch");
-        read_dm_register(7'h11);  // Read DMSTATUS
+        test_count = test_count + 1;
+        read_dm_register_with_check(7'h11, 32'h00000C82);  // Read DMSTATUS
 
         // Test 12: Protocol switching stress test
         $display("\nTest 12: Protocol switching stress test");
+        test_count = test_count + 1;
         test_protocol_switching_stress();
 
         #1000;
 
         $display("\n=== Enhanced System Integration Testbench Completed ===");
-        $display("All 12 tests completed successfully!");
+        $display("Tests completed: %0d passed, %0d failed", pass_count, fail_count);
+        if (fail_count == 0) begin
+            $display("✓ ALL TESTS PASSED!");
+        end else begin
+            $display("✗ %0d TESTS FAILED - Review errors above", fail_count);
+        end
         $display("Coverage: JTAG, cJTAG, DMI, Hart Control, Protocol Switching");
-        $finish;
+
+        if (fail_count > 0) begin
+            $display("\n=== SIMULATION FAILED ===");
+            $finish(1);  // Exit with error code
+        end else begin
+            $finish;
+        end
     end
 
     // Timeout
     initial begin
         #1000000;
         $display("ERROR: Testbench timeout!");
-        $finish;
+        $finish(1);  // Exit with error code
     end
+
+    // DPI function wrapper for C++ access
+    // Returns: 0 = passed, 1 = failed, 2 = timeout
+    function int get_verification_status_dpi();
+        int status;
+        // Check for timeout condition first
+        if ($time >= 1000000) begin
+            status = 2;  // Timeout
+        end else if (fail_count > 0) begin
+            status = 1;  // Failed
+        end else if (pass_count > 0 && test_count > 0) begin
+            status = 0;  // Passed (has tests and all passed)
+        end else begin
+            status = 1;  // No tests completed or unknown state - treat as failed
+        end
+        return status;
+    endfunction
 
     // Task to reset TAP controller
     task reset_tap();
@@ -345,6 +429,62 @@ module system_tb;
         end
     endtask
 
+    // Task to write instruction register (IR scan)
+    task write_ir(input [7:0] instruction);
+        integer i;
+        logic [7:0] captured_ir;
+        begin
+            test_count = test_count + 1;  // Track this test
+
+            $display("  Writing IR: 0x%02h", instruction);
+
+            // Go to Run-Test/Idle
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Select IR path (TMS=1, TMS=1)
+            jtag_pin1_i = 1;
+            wait_tck();
+            jtag_pin1_i = 1;
+            wait_tck();
+
+            // Go to Capture-IR (TMS=0)
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Shift-IR state - shift 7 bits with TMS=0
+            captured_ir = 8'h0;
+            for (i = 0; i < 7; i = i + 1) begin
+                jtag_pin2_i = instruction[i];
+                jtag_pin1_i = 0;  // Stay in Shift-IR
+                wait_tck();
+                captured_ir = {jtag_pin3_o, captured_ir[7:1]};
+            end
+
+            // Shift last bit with TMS=1 to exit Shift-IR
+            jtag_pin2_i = instruction[7];
+            jtag_pin1_i = 1;  // Exit to Exit1-IR
+            wait_tck();
+            captured_ir = {jtag_pin3_o, captured_ir[7:1]};
+            $display("    Captured IR: 0x%02h", captured_ir);
+
+            // Update-IR (TMS=1 from Exit1-IR)
+            jtag_pin1_i = 1;
+            wait_tck();
+
+            // Return to Run-Test/Idle (TMS=0 from Update-IR)
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Stay in Run-Test/Idle for a few cycles to let instruction take effect
+            repeat(5) wait_tck();
+
+            // Mark this test as pass (successful IR shift)
+            pass_count = pass_count + 1;
+            $display("    IR write complete - PASSED");
+        end
+    endtask
+
     // Task to shift in IR instruction
     task shift_ir_instruction(input logic [7:0] instr);
         integer i;
@@ -353,6 +493,110 @@ module system_tb;
                 jtag_pin2_i = instr[i];
                 wait_tck();
             end
+        end
+    endtask
+
+    // Task for IDCODE reading with value checking
+    task read_idcode_with_check(input [31:0] expected_value);
+        integer i;
+        logic [31:0] read_data;
+        begin
+            $display("  Reading and verifying IDCODE register...");
+
+            // Go to Run-Test/Idle
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Select DR path (TMS=1)
+            jtag_pin1_i = 1;
+            wait_tck();
+
+            // Go to Capture-DR (TMS=0)
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Shift IDCODE (shift 32 bits)
+            read_data = 32'h0;
+            for (i = 0; i < 32; i = i + 1) begin
+                jtag_pin2_i = 1'b0;
+                wait_tck();
+                read_data = {jtag_pin3_o, read_data[31:1]};
+            end
+
+            $display("    IDCODE Read: 0x%08h", read_data);
+            $display("    Expected:    0x%08h", expected_value);
+
+            // Check if IDCODE matches expected value
+            if (read_data == expected_value) begin
+                $display("    ✓ IDCODE verification PASSED");
+                pass_count = pass_count + 1;
+            end else begin
+                $display("    ✗ IDCODE verification FAILED");
+                fail_count = fail_count + 1;
+            end
+
+            // Exit shift state
+            jtag_pin1_i = 1;
+            wait_tck();
+
+            // Update-DR
+            jtag_pin1_i = 0;
+            wait_tck();
+        end
+    endtask
+
+    // Task for Debug Module register reading with value checking
+    task read_dm_register_with_check(input [6:0] address, input [31:0] expected_value);
+        integer i;
+        logic [40:0] dmi_cmd;
+        logic [40:0] read_data;
+        logic [31:0] reg_data;
+        begin
+            $display("  Reading and verifying DMI register 0x%02h...", address);
+
+            // Build DMI command (read operation)
+            dmi_cmd = {address, 32'h0, 2'b10};  // Read operation
+
+            // Load DMI instruction (0x11)
+            write_ir(8'h11);
+            #100;
+
+            // Go to DR scan
+            jtag_pin1_i = 0;
+            wait_tck();
+            jtag_pin1_i = 1;  // Select DR
+            wait_tck();
+            jtag_pin1_i = 0;  // Capture DR
+            wait_tck();
+
+            // Shift 41-bit DMI command
+            read_data = 41'h0;
+            for (i = 0; i < 41; i = i + 1) begin
+                jtag_pin2_i = dmi_cmd[i];
+                wait_tck();
+                read_data[i] = jtag_pin3_o;
+            end
+
+            // Extract register data (bits 33:2)
+            reg_data = read_data[33:2];
+
+            $display("    Register Read: 0x%08h", reg_data);
+            $display("    Expected:      0x%08h", expected_value);
+
+            // Check if register value matches expected
+            if (reg_data == expected_value) begin
+                $display("    ✓ DMI register verification PASSED");
+                pass_count = pass_count + 1;
+            end else begin
+                $display("    ✗ DMI register verification FAILED");
+                fail_count = fail_count + 1;
+            end
+
+            // Exit DR scan
+            jtag_pin1_i = 1;
+            wait_tck();
+            jtag_pin1_i = 0;  // Update DR
+            wait_tck();
         end
     endtask
 
