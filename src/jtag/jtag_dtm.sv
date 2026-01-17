@@ -35,7 +35,7 @@ module jtag_dtm (
     localparam [4:0] IR_IDCODE  = 5'h01;
     localparam [4:0] IR_DTMCS   = 5'h10;  // DTM Control and Status
     localparam [4:0] IR_DMI     = 5'h11;  // Debug Module Interface
-    localparam [4:0] IR_BYPASS  = 5'h1F;
+    localparam [4:0] IR_BYPASS  = 5'h1F;  // IEEE 1149.1 standard: all 1's
 
     // IDCODE register value
     localparam [31:0] IDCODE_VALUE = 32'h1DEAD3FF;

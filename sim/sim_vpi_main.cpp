@@ -361,9 +361,10 @@ int main(int argc, char** argv) {
                 }
 
                 // Update VPI server with current signal values
-                // TDO tri-state: when tdo_en=0 (high-z), JTAG default is 1
+                // TDO tri-state: when oen=1 (high-z), JTAG default is 1
+                // oen is active-low: 0=output enabled, 1=tristate
                 {
-                    uint8_t tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
+                    uint8_t tdo_value = (top->jtag_pin3_oen == 0) ? top->jtag_pin3_o : 1;
                     static int signal_update_count = 0;
                     if (++signal_update_count % 50000000 == 0 && debug_level >= 2) {
                         printf("[VPI][DEBUG] VPI Signal Update: tdo=%d, pin3_oen=%d, idcode=0x%08x, active_mode=%d\n",
@@ -438,7 +439,7 @@ int main(int argc, char** argv) {
                         top->jtag_pin2_i = tdi;
                         top->mode_select = mode_sel;
 
-                        uint8_t tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
+                        uint8_t tdo_value = (top->jtag_pin3_oen == 0) ? top->jtag_pin3_o : 1;
 
                         if (tckc_toggle) {
                             // cJTAG mode: toggle TCKC to create one edge
@@ -455,12 +456,13 @@ int main(int argc, char** argv) {
                             if (trace) static_cast<VerilatedVcdC*>(trace)->dump(contextp->time());
 #endif
                             // Update TDO after toggle
+                            // oen is active-low: 0=output enabled, 1=tristate
                             if (mode_sel == 1) {
                                 // cJTAG: TMSC on pin1 (bidirectional)
-                                tdo_value = (top->jtag_pin1_oen) ? top->jtag_pin1_o : 1;
+                                tdo_value = (top->jtag_pin1_oen == 0) ? top->jtag_pin1_o : 1;
                             } else {
                                 // JTAG: TDO on pin3
-                                tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
+                                tdo_value = (top->jtag_pin3_oen == 0) ? top->jtag_pin3_o : 1;
                             }
 
                             if (debug_level >= 2) {
@@ -497,12 +499,13 @@ int main(int argc, char** argv) {
 #endif
 
                             // Update TDO after pulse
+                            // oen is active-low: 0=output enabled, 1=tristate
                             if (mode_sel == 1) {
                                 // cJTAG: TMSC on pin1 (bidirectional)
-                                tdo_value = (top->jtag_pin1_oen) ? top->jtag_pin1_o : 1;
+                                tdo_value = (top->jtag_pin1_oen == 0) ? top->jtag_pin1_o : 1;
                             } else {
                                 // JTAG: TDO on pin3
-                                tdo_value = (top->jtag_pin3_oen) ? top->jtag_pin3_o : 1;
+                                tdo_value = (top->jtag_pin3_oen == 0) ? top->jtag_pin3_o : 1;
                             }
                             if (debug_level >= 2) {
                                 printf("[VPI][DEBUG] TCK Pulse Complete: mode=%s, tdo_value=%d\n",

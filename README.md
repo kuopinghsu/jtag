@@ -410,10 +410,10 @@ Full IEEE 1149.1 state machine:
 
 ### Instruction Register
 
-8-bit IR with standard instructions:
+5-bit IR with standard instructions:
 - `0x01`: IDCODE - Read device ID
 - `0x02`: DEBUG - Debug mode access
-- `0xFF`: BYPASS - Single-bit bypass
+- `0x1F`: BYPASS - Single-bit bypass
 
 ### IDCODE Register
 

@@ -18,14 +18,14 @@ module jtag_top (
     // Pin 1: TMS (JTAG mode) / TMSC (cJTAG mode) - Bidirectional
     input  logic        jtag_pin1_i,     // Input from pad
     output logic        jtag_pin1_o,     // Output to pad
-    output logic        jtag_pin1_oen,   // Output enable (0=input, 1=output)
+    output logic        jtag_pin1_oen,   // Output enable active low (0=output, 1=input/tristate)
 
     // Pin 2: TDI (JTAG mode) / Unused (cJTAG mode) - Input only
     input  logic        jtag_pin2_i,
 
     // Pin 3: TDO (JTAG mode) / Unused (cJTAG mode) - Output only
     output logic        jtag_pin3_o,     // Output to pad
-    output logic        jtag_pin3_oen,   // Output enable (0=tristate, 1=drive)
+    output logic        jtag_pin3_oen,   // Output enable active low (0=output, 1=input/tristate)
 
     // Optional JTAG reset (JTAG mode only)
     input  logic        jtag_trst_n_i,
@@ -64,6 +64,9 @@ module jtag_top (
     logic       tap_clk, tap_tms, tap_tdi, tap_tdo, tap_rst_n;
     logic       ir_out_tdo, dtm_tdo;
     logic       intf_tdi_oscan, intf_tmsc_out, intf_tmsc_oen;
+
+    // TAP reset signal from TAP controller
+    logic       tap_reset_signal;
 
     // ========================================
     // Pin Multiplexing Based on Mode
@@ -113,20 +116,21 @@ module jtag_top (
             jtag_pin1_oen = intf_tmsc_oen;     // TMSC output enable
             // Pin 3: Unused in cJTAG mode
             jtag_pin3_o   = 1'b0;
-            jtag_pin3_oen = 1'b0;              // Tristate/unused
+            jtag_pin3_oen = 1'b1;              // Input/tristate mode (oen active low)
         end else begin
             // ===== JTAG Mode =====
             // Pin 1: TMS is input only
             jtag_pin1_o   = 1'b0;              // Not used
-            jtag_pin1_oen = 1'b0;              // Always input
+            jtag_pin1_oen = 1'b1;              // Input mode (oen active low)
             // Pin 3: TDO output
             jtag_pin3_o   = tap_tdo_internal;  // TDO data
             // Enable TDO during all shift-related states per IEEE 1149.1
-            jtag_pin3_oen = shift_dr | shift_ir |
+            // oen is active low: 0=output enabled, 1=tristate
+            jtag_pin3_oen = ~(shift_dr | shift_ir |
                             (tap_state == 4'h3) |                                              // DR_CAPTURE
                             (tap_state == 4'h5) | (tap_state == 4'h6) | (tap_state == 4'h7) | // DR_EXIT1, DR_PAUSE, DR_EXIT2
                             (tap_state == 4'hA) |                                              // IR_CAPTURE
-                            (tap_state == 4'hC) | (tap_state == 4'hD) | (tap_state == 4'hE);   // IR_EXIT1, IR_PAUSE, IR_EXIT2
+                            (tap_state == 4'hC) | (tap_state == 4'hD) | (tap_state == 4'hE));   // IR_EXIT1, IR_PAUSE, IR_EXIT2
         end
     end
 
@@ -174,13 +178,15 @@ module jtag_top (
         .update_dr        (update_dr),
         .update_ir        (update_ir),
         .capture_dr       (capture_dr),
-        .capture_ir       (capture_ir)
+        .capture_ir       (capture_ir),
+        .tap_reset        (tap_reset_signal)
     );
 
     // Instruction Register
     jtag_instruction_register ir_reg (
         .clk              (tap_clk),
         .rst_n            (tap_rst_n),
+        .tap_reset        (tap_reset_signal),
         .tdi              (tap_tdi),
         .tdo              (ir_out_tdo),
         .shift_ir         (shift_ir),

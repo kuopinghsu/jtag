@@ -14,10 +14,10 @@ module jtag_vpi_top
     input  logic jtag_pin0_i,      // Pin 0: TCK/TCKC (input)
     input  logic jtag_pin1_i,      // Pin 1: TMS/TMSC (bidir input)
     output logic jtag_pin1_o,      // Pin 1: TMSC output
-    output logic jtag_pin1_oen,    // Pin 1: Output enable
+    output logic jtag_pin1_oen,    // Pin 1: Output enable (active low)
     input  logic jtag_pin2_i,      // Pin 2: TDI (input)
     output logic jtag_pin3_o,      // Pin 3: TDO (output)
-    output logic jtag_pin3_oen,    // Pin 3: Output enable
+    output logic jtag_pin3_oen,    // Pin 3: Output enable (active low)
     input  logic jtag_trst_n_i,    // Optional TRST_N
     input  logic mode_select,      // 0=JTAG, 1=cJTAG
 

@@ -6,6 +6,7 @@
 module jtag_instruction_register (
     input  logic       clk,
     input  logic       rst_n,
+    input  logic       tap_reset,      // TAP reset from TAP controller
     input  logic       tdi,
     output logic       tdo,
     input  logic       shift_ir,
@@ -20,9 +21,9 @@ module jtag_instruction_register (
     logic [4:0] ir_shift_reg;
     logic [4:0] ir_latch;
 
-    // Shift logic
+    // Shift logic with TAP reset support
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
+        if (!rst_n || tap_reset) begin
             ir_shift_reg <= DEFAULT_IR;
             ir_latch     <= DEFAULT_IR;
         end else if (capture_ir) begin

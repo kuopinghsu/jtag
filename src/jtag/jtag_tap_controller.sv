@@ -15,7 +15,10 @@ module jtag_tap_controller (
     output logic       update_dr,
     output logic       update_ir,
     output logic       capture_dr,
-    output logic       capture_ir
+    output logic       capture_ir,
+
+    // TAP reset signal (asserted when in TEST_LOGIC_RESET state)
+    output logic       tap_reset
 );
 
     // TAP Controller States
@@ -97,6 +100,9 @@ module jtag_tap_controller (
 
     // Export state for debugging
     assign state = current_state;
+
+    // TAP reset signal generation (active when in TEST_LOGIC_RESET state)
+    assign tap_reset = (current_state == TEST_LOGIC_RESET);
 
 `ifdef VERBOSE
     // Enhanced debug output for TAP control signals

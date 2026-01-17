@@ -69,6 +69,138 @@ module jtag_top (
 );
 ```
 
+## JTAG/cJTAG I/O Pin Configuration
+
+### Physical Pin Mapping
+
+The implementation uses 4 shared physical pins that operate in different modes:
+
+| Pin | JTAG Mode (4-wire) | cJTAG Mode (2-wire) | Direction | Pull Requirement |
+|-----|-------------------|---------------------|-----------|------------------|
+| Pin 0 | TCK (Test Clock) | TCKC (Combined Clock) | Input | Pull-down (10kΩ-100kΩ) |
+| Pin 1 | TMS (Test Mode Select) | TMSC (Bidirectional Data) | Bidir | Pull-up (10kΩ-47kΩ) |
+| Pin 2 | TDI (Test Data In) | Unused | Input | Pull-up (10kΩ-47kΩ) |
+| Pin 3 | TDO (Test Data Out) | Unused | Output | No pull required |
+
+### Pin Descriptions
+
+#### Pin 0: TCK/TCKC
+**JTAG Mode (TCK):**
+- **Function**: Test clock input (rising edge active)
+- **Requirements**:
+  - Pull-down resistor (10kΩ-100kΩ) to ensure clean idle state
+  - Maximum frequency: Typically 1-50 MHz (design dependent)
+  - Minimum pulse width: 20ns high, 20ns low
+- **Connection**: Connect to JTAG debugger TCK output
+
+**cJTAG Mode (TCKC):**
+- **Function**: Combined clock/control signal for OScan1 protocol
+- **Requirements**:
+  - Pull-down resistor (10kΩ-100kΩ)
+  - Supports both clock and data encoding
+  - Edge detection for OAC (Offline Access Controller) sequences
+- **Connection**: Connect to cJTAG debugger TCKC output
+
+#### Pin 1: TMS/TMSC
+**JTAG Mode (TMS):**
+- **Function**: Test Mode Select - controls TAP state machine transitions
+- **Requirements**:
+  - Pull-up resistor (10kΩ-47kΩ) for IEEE 1149.1 compliance
+  - TMS=1 moves TAP to Test-Logic-Reset state
+  - Input-only in JTAG mode (oen=1, tristate)
+- **Connection**: Connect to JTAG debugger TMS output
+
+**cJTAG Mode (TMSC):**
+- **Function**: Bidirectional data for OScan1 protocol
+- **Requirements**:
+  - Pull-up resistor (10kΩ-47kΩ)
+  - Bidirectional operation (input/output via oen control)
+  - Supports zero insertion/deletion (bit stuffing)
+- **Connection**: Connect to cJTAG debugger TMSC pin
+- **Operation**:
+  - Input: Receives TMS/TDI data during SF0 scanning format
+  - Output: Returns TDO data when oen=0 (active-low enable)
+
+#### Pin 2: TDI
+**JTAG Mode (TDI):**
+- **Function**: Test Data Input - serial data input to scan chains
+- **Requirements**:
+  - Pull-up resistor (10kΩ-47kΩ) per IEEE 1149.1
+  - Input-only operation
+  - Data sampled on TCK rising edge
+- **Connection**: Connect to JTAG debugger TDI output
+
+**cJTAG Mode:**
+- **Function**: Unused (no connection required)
+- **Requirements**: Can be left floating or tied to VCC via pull-up
+
+#### Pin 3: TDO
+**JTAG Mode (TDO):**
+- **Function**: Test Data Output - serial data output from scan chains
+- **Requirements**:
+  - No pull resistor required (actively driven when enabled)
+  - Tristate when not shifting (oen=1)
+  - Output enabled during shift states only
+- **Connection**: Connect to JTAG debugger TDI input
+- **Timing**: Data valid on TCK falling edge
+
+**cJTAG Mode:**
+- **Function**: Unused (high-impedance)
+- **Requirements**: No connection required, remains in tristate (oen=1)
+
+### Output Enable (OEN) Logic
+
+The implementation uses **active-low output enable** signals:
+- **oen = 0**: Output driver enabled (pin drives signal)
+- **oen = 1**: Output driver disabled (pin in input/tristate mode)
+
+**JTAG Mode:**
+- `jtag_pin1_oen = 1` (Pin 1 always input for TMS)
+- `jtag_pin3_oen = 0` during shift states, `1` otherwise (TDO tristate control)
+
+**cJTAG Mode:**
+- `jtag_pin1_oen` dynamically controlled by OScan1 protocol for TMSC bidirectional operation
+- `jtag_pin3_oen = 1` (Pin 3 unused, always tristate)
+
+### Electrical Requirements
+
+#### Supply Voltage
+- **VDD**: 1.8V, 2.5V, 3.3V, or 5V (depending on target system)
+- **I/O Standard**: LVCMOS, LVTTL, or target-specific
+
+#### Pull-up/Pull-down Specifications
+- **Pull-up resistors**: 10kΩ - 47kΩ (TMS, TDI, TMSC)
+- **Pull-down resistors**: 10kΩ - 100kΩ (TCK, TCKC)
+- **Tolerance**: ±5% for critical timing applications
+- **Power rating**: 1/8W minimum
+
+#### Signal Integrity
+- **Rise/Fall time**: < 5ns for frequencies > 10MHz
+- **Overshoot/Undershoot**: < 10% of VDD
+- **Crosstalk**: Minimize coupling between JTAG signals
+- **EMI**: Consider shielding for high-frequency operation
+
+### PCB Layout Guidelines
+
+1. **Trace Routing**:
+   - Keep JTAG traces short (< 6 inches for 10MHz+ operation)
+   - Use controlled impedance (50Ω single-ended)
+   - Minimize via count in signal paths
+
+2. **Grounding**:
+   - Provide solid ground plane under JTAG signals
+   - Connect target and debugger grounds together
+   - Add ground guard traces if needed
+
+3. **Power**:
+   - Decouple VDD with 0.1µF ceramic capacitor near JTAG pins
+   - Use separate JTAG VDD domain if possible
+
+4. **Component Placement**:
+   - Place pull-up/pull-down resistors close to target device pins
+   - Keep debugger connector close to target JTAG pins
+   - Avoid placing switching circuits near JTAG signals
+
 **Signal Flow:**
 1. Physical pins → `jtag_interface` → Internal JTAG signals
 2. Internal signals → `jtag_tap_controller` → TAP state
