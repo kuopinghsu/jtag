@@ -256,7 +256,7 @@ module system_top (
                     3'h0: memory[sb_address[7:0]][7:0]   <= sb_wdata[7:0];    // Byte
                     3'h1: memory[sb_address[7:0]][15:0]  <= sb_wdata[15:0];   // Half
                     3'h2: memory[sb_address[7:0]][31:0]  <= sb_wdata[31:0];   // Word
-                    3'h3: memory[sb_address[7:0]]        <= sb_wdata;          // Double
+                    3'h3: memory[sb_address[7:0]]        <= sb_wdata;         // Double
                     default: memory[sb_address[7:0]]     <= sb_wdata;
                 endcase
             end else if (sb_busy) begin
