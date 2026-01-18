@@ -126,11 +126,16 @@ module jtag_top (
             jtag_pin3_o   = tap_tdo_internal;  // TDO data
             // Enable TDO during all shift-related states per IEEE 1149.1
             // oen is active low: 0=output enabled, 1=tristate
-            jtag_pin3_oen = ~(shift_dr | shift_ir |
-                            (tap_state == 4'h3) |                                              // DR_CAPTURE
-                            (tap_state == 4'h5) | (tap_state == 4'h6) | (tap_state == 4'h7) | // DR_EXIT1, DR_PAUSE, DR_EXIT2
-                            (tap_state == 4'hA) |                                              // IR_CAPTURE
-                            (tap_state == 4'hC) | (tap_state == 4'hD) | (tap_state == 4'hE));   // IR_EXIT1, IR_PAUSE, IR_EXIT2
+            jtag_pin3_oen = ~((tap_state == 4'h3) |  // DR_CAPTURE
+                            (tap_state == 4'h4) |   // DR_SHIFT
+                            (tap_state == 4'h5) |   // DR_EXIT1
+                            (tap_state == 4'h6) |   // DR_PAUSE
+                            (tap_state == 4'h7) |   // DR_EXIT2
+                            (tap_state == 4'hA) |   // IR_CAPTURE
+                            (tap_state == 4'hB) |   // IR_SHIFT
+                            (tap_state == 4'hC) |   // IR_EXIT1
+                            (tap_state == 4'hD) |   // IR_PAUSE
+                            (tap_state == 4'hE));   // IR_EXIT2
         end
     end
 

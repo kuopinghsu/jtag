@@ -40,11 +40,11 @@ module jtag_dtm (
     // IDCODE register value
     localparam [31:0] IDCODE_VALUE = 32'h1DEAD3FF;
 
-    // DTMCS register fields (32-bit)
+    // DTMCS register fields (32-bit) - RISC-V Debug Spec v0.13.2 compliant
     logic [31:0] dtmcs_reg;
     localparam [3:0]  DTMCS_VERSION    = 4'h1;     // Debug spec version 0.13
-    localparam [5:0]  DTMCS_ABITS      = 6'd7;     // DMI address bits
-    localparam [2:0]  DTMCS_IDLE       = 3'd1;     // Required idle cycles
+    localparam [5:0]  DTMCS_ABITS      = 6'd7;     // DMI address bits (7 bits = 128 addresses)
+    localparam [2:0]  DTMCS_IDLE       = 3'd1;     // Required idle cycles between DMI operations
 
     // DMI register (41-bit: 7-bit addr + 32-bit data + 2-bit op)
     logic [40:0] dmi_reg;
@@ -88,15 +88,14 @@ module jtag_dtm (
         end
     end
 
-    // Build DTMCS register
+    // Build DTMCS register (RISC-V Debug Spec v0.13.2 compliant)
     always_comb begin
         dtmcs_reg = 32'h0;
-        dtmcs_reg[31:28] = 4'h0;              // Reserved
-        dtmcs_reg[27:24] = 4'h0;              // dmihardreset (write-only)
-        dtmcs_reg[23:20] = 4'h0;              // dmireset (write-only)
-        dtmcs_reg[19:18] = 2'h0;              // Reserved
-        dtmcs_reg[17]    = 1'b0;              // dmistat (sticky error)
-        dtmcs_reg[16:15] = 2'h0;              // Reserved
+        dtmcs_reg[31:21] = 11'h0;             // Reserved (must be 0)
+        dtmcs_reg[20:18] = 3'h0;              // errinfo (optional, read-only)
+        dtmcs_reg[17]    = 1'b0;              // dtmhardreset (write-only, reads as 0)
+        dtmcs_reg[16]    = 1'b0;              // dmireset (write-only, reads as 0)
+        dtmcs_reg[15]    = 1'b0;              // Reserved (must be 0)
         dtmcs_reg[14:12] = DTMCS_IDLE;        // idle cycles needed
         dtmcs_reg[11:10] = last_response;     // dmistat: 0=success, 2=fail, 3=busy
         dtmcs_reg[9:4]   = DTMCS_ABITS;       // Address bits
