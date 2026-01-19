@@ -47,8 +47,23 @@ module system_tb;
     integer pass_count = 0;
     integer fail_count = 0;
 
+    // Failed test tracking
+    parameter MAX_TESTS = 20;
+    string failed_tests [MAX_TESTS];
+    integer failed_test_numbers [MAX_TESTS];
+    integer failed_test_count = 0;
+
     // Global variable to track verification results from tasks
     logic last_verification_result = 1'b0;
+
+    // Task to record failed test
+    task record_failed_test(input integer test_num, input string test_name);
+        if (failed_test_count < MAX_TESTS) begin
+            failed_tests[failed_test_count] = test_name;
+            failed_test_numbers[failed_test_count] = test_num;
+            failed_test_count = failed_test_count + 1;
+        end
+    endtask
 
     // Instantiate DUT
     system_top dut (
@@ -118,6 +133,7 @@ module system_tb;
             $display("    ✓ Test 1 PASSED - TAP reset verified with IDCODE readback");
         end else begin
             fail_count = fail_count + 1;
+            record_failed_test(1, "TAP Controller Reset");
             $display("    ✗ Test 1 FAILED - TAP reset verification failed");
         end
 
@@ -130,6 +146,7 @@ module system_tb;
             $display("    ✓ Test 2 PASSED - IDCODE verification successful");
         end else begin
             fail_count = fail_count + 1;
+            record_failed_test(2, "Read IDCODE via DTM");
             $display("    ✗ Test 2 FAILED - IDCODE verification failed");
         end
 
@@ -142,6 +159,7 @@ module system_tb;
             $display("    ✓ Test 3 PASSED - DMSTATUS register verification successful");
         end else begin
             fail_count = fail_count + 1;
+            record_failed_test(3, "Read Debug Module Status");
             $display("    ✗ Test 3 FAILED - DMSTATUS register verification failed");
         end
 
@@ -168,6 +186,7 @@ module system_tb;
                 $display("    ✓ Test 4 PASSED - Hart successfully halted with register verification");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(4, "Halt Hart via Debug Module");
                 $display("    ✗ Test 4 FAILED - Hart halt failed (halted=%0b, debug_req=%0b, dmcontrol_ok=%0b, dmstatus_ok=%0b)",
                          hart_halted, debug_req, dmcontrol_ok, dmstatus_ok);
             end
@@ -182,6 +201,7 @@ module system_tb;
             $display("    ✓ Test 5 PASSED - DMSTATUS verification after halt successful");
         end else begin
             fail_count = fail_count + 1;
+            record_failed_test(5, "Read DMSTATUS after halt");
             $display("    ✗ Test 5 FAILED - DMSTATUS verification after halt failed");
         end
 
@@ -207,6 +227,7 @@ module system_tb;
                 $display("    ✓ Test 6 PASSED - Hart resume successful with register verification");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(6, "Resume Hart");
                 $display("    ✗ Test 6 FAILED - Hart resume failed (halted=%0b, dmcontrol_ok=%0b, dmstatus_ok=%0b)",
                          hart_halted, dmcontrol_ok, dmstatus_ok);
             end
@@ -229,10 +250,12 @@ module system_tb;
                 $display("    ✓ Test 7 PASSED - cJTAG mode switched and IDCODE verification successful");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(7, "Switch to cJTAG mode - IDCODE verification");
                 $display("    ✗ Test 7 FAILED - cJTAG mode switched but IDCODE verification failed");
             end
         end else begin
             fail_count = fail_count + 1;
+            record_failed_test(7, "Switch to cJTAG mode");
             $display("    ✗ Test 7 FAILED - Failed to switch to cJTAG mode (active_mode=%0b)", active_mode);
         end
 
@@ -245,6 +268,7 @@ module system_tb;
             $display("    ✓ Test 8 PASSED - cJTAG DMI register verification successful");
         end else begin
             fail_count = fail_count + 1;
+            record_failed_test(8, "cJTAG DMI register access");
             $display("    ✗ Test 8 FAILED - cJTAG DMI register verification failed");
         end
 
@@ -270,6 +294,7 @@ module system_tb;
                 $display("    ✓ Test 9 PASSED - Hart control works in cJTAG mode with register verification");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(9, "cJTAG hart control");
                 $display("    ✗ Test 9 FAILED - Hart control failed in cJTAG mode (halted=%0b, dmcontrol_ok=%0b, dmstatus_ok=%0b)",
                          hart_halted, dmcontrol_ok, dmstatus_ok);
             end
@@ -292,10 +317,12 @@ module system_tb;
                 $display("    ✓ Test 10 PASSED - JTAG mode switched and IDCODE verification successful");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(10, "Return to JTAG mode - IDCODE verification");
                 $display("    ✗ Test 10 FAILED - JTAG mode switched but IDCODE verification failed");
             end
         end else begin
             fail_count = fail_count + 1;
+            record_failed_test(10, "Return to JTAG mode");
             $display("    ✗ Test 10 FAILED - Failed to return to JTAG mode (active_mode=%0b)", active_mode);
         end
 
@@ -308,6 +335,7 @@ module system_tb;
             $display("    ✓ Test 11 PASSED - JTAG mode verification successful");
         end else begin
             fail_count = fail_count + 1;
+            record_failed_test(11, "Verify JTAG mode after switch");
             $display("    ✗ Test 11 FAILED - JTAG mode verification failed");
         end
 
@@ -321,6 +349,7 @@ module system_tb;
                 $display("    ✓ Test 12 PASSED - Protocol switching stress test successful");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(12, "Protocol switching stress test");
                 $display("    ✗ Test 12 FAILED - Protocol switching stress test failed");
             end
         end
@@ -335,6 +364,7 @@ module system_tb;
                 $display("    ✓ Test 13 PASSED - DMI write/read verification successful");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(13, "DMI Write/Read Verification");
                 $display("    ✗ Test 13 FAILED - DMI write/read verification failed");
             end
         end
@@ -349,6 +379,7 @@ module system_tb;
                 $display("    ✓ Test 14 PASSED - Abstract data register verification successful");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(14, "Abstract Data Register Test");
                 $display("    ✗ Test 14 FAILED - Abstract data register verification failed");
             end
         end
@@ -363,6 +394,7 @@ module system_tb;
                 $display("    ✓ Test 15 PASSED - Program buffer verification successful");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(15, "Program Buffer Test");
                 $display("    ✗ Test 15 FAILED - Program buffer verification failed");
             end
         end
@@ -377,6 +409,7 @@ module system_tb;
                 $display("    ✓ Test 16 PASSED - HARTINFO register verification successful");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(16, "Hart Info Register Test");
                 $display("    ✗ Test 16 FAILED - HARTINFO register verification failed");
             end
         end
@@ -391,6 +424,7 @@ module system_tb;
                 $display("    ✓ Test 17 PASSED - Comprehensive register pattern verification successful");
             end else begin
                 fail_count = fail_count + 1;
+                record_failed_test(17, "Comprehensive Register Pattern Test");
                 $display("    ✗ Test 17 FAILED - Comprehensive register pattern verification failed");
             end
         end
@@ -398,12 +432,39 @@ module system_tb;
         #1000;
 
         $display("\n=== Enhanced System Integration Testbench Completed ===");
-        $display("Tests completed: %0d passed, %0d failed (Total: %0d tests)", pass_count, fail_count, test_count);
+        $display("Tests completed: %0d total, %0d passed, %0d failed", test_count, pass_count, fail_count);
+
         if (fail_count == 0) begin
             $display("✓ ALL TESTS PASSED!");
+            $display("  - System Integration: PASSED");
+            $display("  - JTAG TAP operations: PASSED");
+            $display("  - Debug Module Interface (DMI): PASSED");
+            $display("  - Hart Control (halt/resume): PASSED");
+            $display("  - cJTAG protocol switching: PASSED");
+            $display("  - Abstract data registers: PASSED");
+            $display("  - Program buffer access: PASSED");
         end else begin
-            $display("✗ %0d TESTS FAILED - Review errors above", fail_count);
+            $display("✗ %0d TESTS FAILED - Details below:", fail_count);
+            $display("\n=== FAILED TEST SUMMARY ===");
+            for (integer i = 0; i < failed_test_count; i++) begin
+                $display("  Test %0d: %s", failed_test_numbers[i], failed_tests[i]);
+            end
+            $display("\n=== RECOMMENDATIONS ===");
+            $display("  - Check waveform file: system_sim.fst");
+            $display("  - Review DMI register access and data patterns");
+            $display("  - Verify JTAG signal timing and protocol");
+            $display("  - Check Debug Module register responses");
         end
+
+        $display("\n=== TEST COVERAGE ===");
+        $display("  ✓ JTAG/cJTAG Protocol Integration");
+        $display("  ✓ RISC-V Debug Module Interface (DMI)");
+        $display("  ✓ Hart Control and Status Verification");
+        $display("  ✓ Abstract Command Interface");
+        $display("  ✓ Program Buffer Access");
+        $display("\n=== PERFORMANCE METRICS ===");
+        $display("  Total simulation time: %0t", $time);
+        $display("  Pass rate: %0d%% (%0d/%0d)", (pass_count * 100) / test_count, pass_count, test_count);
         $display("Coverage: JTAG, cJTAG, DMI, Hart Control, Abstract Data, Program Buffer");
         $display("Enhanced Features: Comprehensive data readback verification for all operations");
 
