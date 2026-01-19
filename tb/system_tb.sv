@@ -543,23 +543,21 @@ module system_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
+            // Transition from Capture-IR to Shift-IR (TMS=0)
+            jtag_pin1_i = 0;
+            wait_tck();
+
             // Shift-IR state - shift 7 bits with TMS=0
             captured_ir = 8'h0;
             for (i = 0; i < 7; i = i + 1) begin
                 jtag_pin2_i = instruction[i];
-                jtag_pin1_i = 0;  // Stay in Shift-IR
-                wait_tck();
+                jtag_pin1_i = (i == 7) ? 1 : 0;  // TMS=1 on last bit to exit
                 captured_ir = {jtag_pin3_o, captured_ir[7:1]};
+                wait_tck();
             end
-
-            // Shift last bit with TMS=1 to exit Shift-IR
-            jtag_pin2_i = instruction[7];
-            jtag_pin1_i = 1;  // Exit to Exit1-IR
-            wait_tck();
-            captured_ir = {jtag_pin3_o, captured_ir[7:1]};
             $display("    Captured IR: 0x%02h", captured_ir);
 
-            // Update-IR (TMS=1 from Exit1-IR)
+            // Now in Exit1-IR state, go to Update-IR (TMS=1)
             jtag_pin1_i = 1;
             wait_tck();
 

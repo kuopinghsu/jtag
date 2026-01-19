@@ -45,6 +45,12 @@ module jtag_tb;
     // Global variable to track verification results from tasks
     logic last_verification_result = 1'b0;
 
+    // JTAG module path definitions for easier signal access
+    `define JTAG_IR_LATCH    dut.ir_reg.ir_latch
+    `define JTAG_IR_OUT      dut.ir_reg.ir_out
+    `define JTAG_IDCODE      dut.idcode
+    `define JTAG_TAP_STATE   dut.tap_ctrl.state
+
     // Clock generation
     initial begin
         clk = 0;
@@ -184,7 +190,7 @@ module jtag_tb;
         // Test 3: IR Scan - Load BYPASS instruction
         $display("\nTest 3: IR Scan - Load BYPASS");
         test_count = test_count + 1;
-        write_ir_with_verify(8'h1F, 8'h1F);  // BYPASS instruction (5-bit: 0x1F)
+        write_ir_with_verify(8'h1F);  // BYPASS instruction (5-bit: 0x1F)
         if (last_verification_result) begin
             pass_count = pass_count + 1;
             $display("    ✓ Test 3 PASSED - BYPASS IR instruction loaded successfully");
@@ -198,7 +204,7 @@ module jtag_tb;
         $display("\nTest 4: DR Scan - BYPASS register test");
         test_count = test_count + 1;
         reset_tap();  // Reset TAP to ensure clean state
-        write_ir(8'h1F);  // Reload BYPASS after reset (5-bit: 0x1F)
+        write_ir_with_verify(8'h1F);  // Reload BYPASS after reset (5-bit: 0x1F)
         test_bypass();
         if (last_verification_result) begin
             pass_count = pass_count + 1;
@@ -212,7 +218,7 @@ module jtag_tb;
         // Test 5: IR Scan - Load IDCODE instruction
         $display("\nTest 5: IR Scan - Load IDCODE instruction");
         test_count = test_count + 1;
-        write_ir_with_verify(8'h01, 8'h01);  // Explicitly load IDCODE instruction
+        write_ir_with_verify(8'h01);  // Explicitly load IDCODE instruction
         if (last_verification_result) begin
             pass_count = pass_count + 1;
             $display("    ✓ Test 5 PASSED - IDCODE IR instruction loaded successfully");
@@ -238,7 +244,7 @@ module jtag_tb;
         // Test 7: IR Scan - Load DTMCS instruction
         $display("\nTest 7: IR Scan - Load DTMCS instruction");
         test_count = test_count + 1;
-        write_ir_with_verify(8'h10, 8'h10);  // DTMCS instruction
+        write_ir_with_verify(8'h10);  // DTMCS instruction
         if (last_verification_result) begin
             pass_count = pass_count + 1;
             $display("    ✓ Test 7 PASSED - DTMCS IR instruction loaded successfully");
@@ -264,7 +270,7 @@ module jtag_tb;
         // Test 9: IR Scan - Load DMI instruction
         $display("\nTest 9: IR Scan - Load DMI instruction");
         test_count = test_count + 1;
-        write_ir_with_verify(8'h11, 8'h11);  // DMI instruction
+        write_ir_with_verify(8'h11);  // DMI instruction
         if (last_verification_result) begin
             pass_count = pass_count + 1;
             $display("    ✓ Test 9 PASSED - DMI IR instruction loaded successfully");
@@ -600,11 +606,13 @@ module jtag_tb;
     endtask
 
     // Task to write instruction register with verification
-    task write_ir_with_verify(input [7:0] instruction, input [7:0] expected_ir);
+    task write_ir_with_verify(input [7:0] instruction);
         integer i;
         logic [4:0] captured_ir;
         logic [4:0] ir_value;
         logic [4:0] expected_value;
+        logic capture_passed;
+        logic load_passed;
         begin
             ir_value = instruction[4:0];
             expected_value = 5'h01;  // IR capture always returns 0x01 per IEEE 1149.1
@@ -624,19 +632,19 @@ module jtag_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            // Shift-IR state - shift ALL 5 bits with TMS=0 (stay in Shift-IR)
+            // Transition from Capture-IR to Shift-IR (TMS=0)
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Now in Shift-IR state - shift all 5 bits with proper timing
             captured_ir = 5'h0;
             for (i = 0; i < 5; i = i + 1) begin
-                jtag_pin2_i = ir_value[i];
-                jtag_pin1_i = 0;  // Stay in Shift-IR for all 5 bits
-                wait_tck();
-                #1;
+                jtag_pin2_i = ir_value[i];  // Set TDI for this bit
+                jtag_pin1_i = (i == 4) ? 1 : 0;  // TMS=1 on last bit to exit
                 captured_ir = {jtag_pin3_o, captured_ir[4:1]};
+                wait_tck();
             end
-
-            // Exit Shift-IR with TMS=1 (don't change TDI)
-            jtag_pin1_i = 1;
-            wait_tck();
+            $display("    Captured IR: 0x%02h", captured_ir);
 
             // Now in Exit1-IR state, go to Update-IR (TMS=1)
             jtag_pin1_i = 1;
@@ -645,18 +653,34 @@ module jtag_tb;
             // Return to Run-Test/Idle (TMS=0 from Update-IR)
             jtag_pin1_i = 0;
             wait_tck();
+
+            // Stay in Run-Test/Idle for a few cycles to let instruction take effect
             repeat(5) wait_tck();
 
             $display("    Wrote IR: 0x%02h, Captured IR: 0x%02h", ir_value, captured_ir);
 
-            // Verify the captured IR value against expected value (should be 0x01)
-            if (captured_ir == expected_value) begin
-                $display("    ✓ IR verification PASSED - captured matches expected (0x%02h)", expected_value);
-                last_verification_result = 1'b1;
+            // Dual verification: IEEE 1149.1 compliance + actual instruction load
+            capture_passed = (captured_ir == expected_value);
+            load_passed = (`JTAG_IR_LATCH == ir_value);
+
+            if (capture_passed) begin
+                $display("    ✓ IR capture verification PASSED - IEEE 1149.1 pattern (0x%02h)", expected_value);
             end else begin
-                $display("    ✗ IR verification FAILED - captured: 0x%02h, expected: 0x%02h", captured_ir, expected_value);
-                last_verification_result = 1'b0;
+                $display("    ✗ IR capture verification FAILED - captured: 0x%02h, expected: 0x%02h", captured_ir, expected_value);
             end
+
+            if (load_passed) begin
+                $display("    ✓ IR load verification PASSED - instruction loaded (0x%02h)", ir_value);
+            end else begin
+                $display("    ✗ IR load verification FAILED - ir_latch: 0x%02h, expected: 0x%02h",
+                         `JTAG_IR_LATCH, ir_value);
+            end
+
+            // Both verifications must pass
+            last_verification_result = capture_passed && load_passed;
+
+            // Debug info
+            $display("    Debug: ir_out=0x%02h, tap_state=0x%h", `JTAG_IR_OUT, `JTAG_TAP_STATE);
         end
     endtask
 
@@ -744,23 +768,21 @@ module jtag_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            // Shift-IR state - shift 4 bits with TMS=0, then exit with TMS=1
-            captured_ir = 5'h0;
-            for (i = 0; i < 4; i = i + 1) begin
-                jtag_pin2_i = ir_value[i];
-                jtag_pin1_i = 0;  // Stay in Shift-IR
-                wait_tck();
-                captured_ir = {jtag_pin3_o, captured_ir[4:1]};
-            end
-
-            // Shift final bit with TMS=1 to exit
-            jtag_pin2_i = ir_value[4];
-            jtag_pin1_i = 1;     // Exit to Exit1-IR
+            // Transition from Capture-IR to Shift-IR (TMS=0)
+            jtag_pin1_i = 0;
             wait_tck();
-            captured_ir = {jtag_pin3_o, captured_ir[4:1]};
+
+            // Shift-IR state - shift all 5 bits with TMS=0
+            captured_ir = 5'h0;
+            for (i = 0; i < 5; i = i + 1) begin
+                jtag_pin2_i = ir_value[i];
+                jtag_pin1_i = (i == 4) ? 1 : 0;  // TMS=1 on last bit to exit
+                captured_ir = {jtag_pin3_o, captured_ir[4:1]};
+                wait_tck();
+            end
             $display("    Captured IR: 0x%02h", captured_ir);
 
-            // Update-IR (TMS=1 from Exit1-IR)
+            // Now in Exit1-IR state, go to Update-IR (TMS=1)
             jtag_pin1_i = 1;
             wait_tck();
 

@@ -36,7 +36,8 @@ module jtag_instruction_register (
     end
 
     assign tdo = ir_shift_reg[0];
-    // During IR shift/capture, use the shift register; after update, use the latch
+
+    // IR output: always use the latched instruction (stable during shift)
     assign ir_out = ir_latch;
 
 `ifdef VERBOSE
