@@ -42,6 +42,11 @@ module system_tb;
     logic        hart_halted;
     logic        active_mode;
 
+    // JTAG module path definitions for easier signal access
+    `define JTAG_IR_LATCH    dut.jtag.ir_reg.ir_latch
+    `define JTAG_IR_OUT      dut.jtag.ir_reg.ir_out
+    `define JTAG_TAP_STATE   dut.jtag.tap_ctrl.state
+
     // Test tracking variables
     integer test_count = 0;
     integer pass_count = 0;
@@ -522,47 +527,36 @@ module system_tb;
         begin
             $display("  Writing DM register 0x%02h = 0x%08h via DMI...", addr, data);
 
-            // Select IR scan
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Capture-IR
+            // Start from Run-Test/Idle
             jtag_pin1_i = 0;
             wait_tck();
 
-            // Shift in DMI instruction (0x11)
-            shift_ir_instruction(8'h11);
-
-            // Update IR
+            // Go to Select-DR (TMS=1)
             jtag_pin1_i = 1;
             wait_tck();
 
-            // Go to Run-Test/Idle
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Select DR
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Capture DR
+            // Go to Capture-DR (TMS=0)
             jtag_pin1_i = 0;
             wait_tck();
 
             // Shift in DMI write request (41 bits: 7-bit addr + 32-bit data + 2-bit op)
-            dmi_data = {addr, data, 2'b10};  // Write operation
+            dmi_data = {addr, data, 2'b01};  // Write operation (01 = write, 10 = read)
             for (i = 0; i < 41; i = i + 1) begin
                 jtag_pin2_i = dmi_data[i];
+                jtag_pin1_i = (i == 40) ? 1 : 0;  // TMS=1 on last bit to exit
                 wait_tck();
             end
 
-            // Update DR
+            // Update-DR (TMS=1 from Exit1-DR)
             jtag_pin1_i = 1;
             wait_tck();
 
-            // Return to Idle
+            // Return to Run-Test/Idle (TMS=0 from Update-DR)
             jtag_pin1_i = 0;
             wait_tck();
+
+            // Small delay to let DMI operation process
+            repeat(5) wait_tck();
 
             $display("  Write operation submitted to DMI");
         end
@@ -583,12 +577,18 @@ module system_tb;
         end
     endtask
 
-    // Task to write instruction register (IR scan)
-    task write_ir(input [7:0] instruction);
+    // Task to write instruction register with verification
+    task write_ir_with_verify(input [4:0] instruction);
         integer i;
-        logic [7:0] captured_ir;
+        logic [4:0] captured_ir;
+        logic [4:0] ir_value;
+        logic [4:0] expected_value;
+        logic capture_passed;
+        logic load_passed;
         begin
-            $display("  Writing IR: 0x%02h", instruction);
+            ir_value = instruction[4:0];
+            expected_value = 5'h01;  // IR capture always returns 0x01 per IEEE 1149.1
+            $display("  Writing and verifying IR: 0x%02h (capture will be: 0x%02h)", instruction, expected_value);
 
             // Go to Run-Test/Idle
             jtag_pin1_i = 0;
@@ -608,12 +608,12 @@ module system_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            // Shift-IR state - shift 7 bits with TMS=0
-            captured_ir = 8'h0;
-            for (i = 0; i < 7; i = i + 1) begin
-                jtag_pin2_i = instruction[i];
-                jtag_pin1_i = (i == 7) ? 1 : 0;  // TMS=1 on last bit to exit
-                captured_ir = {jtag_pin3_o, captured_ir[7:1]};
+            // Now in Shift-IR state - shift all 5 bits with proper timing
+            captured_ir = 5'h0;
+            for (i = 0; i < 5; i = i + 1) begin
+                jtag_pin2_i = ir_value[i];  // Set TDI for this bit
+                jtag_pin1_i = (i == 4) ? 1 : 0;  // TMS=1 on last bit to exit
+                captured_ir = {jtag_pin3_o, captured_ir[4:1]};
                 wait_tck();
             end
             $display("    Captured IR: 0x%02h", captured_ir);
@@ -629,7 +629,30 @@ module system_tb;
             // Stay in Run-Test/Idle for a few cycles to let instruction take effect
             repeat(5) wait_tck();
 
-            $display("    IR write complete");
+            $display("    Wrote IR: 0x%02h, Captured IR: 0x%02h", ir_value, captured_ir);
+
+            // Dual verification: IEEE 1149.1 compliance + actual instruction load
+            capture_passed = (captured_ir == expected_value);
+            load_passed = (`JTAG_IR_LATCH == ir_value);
+
+            if (capture_passed) begin
+                $display("    ✓ IR capture verification PASSED - IEEE 1149.1 pattern (0x%02h)", expected_value);
+            end else begin
+                $display("    ✗ IR capture verification FAILED - captured: 0x%02h, expected: 0x%02h", captured_ir, expected_value);
+            end
+
+            if (load_passed) begin
+                $display("    ✓ IR load verification PASSED - instruction loaded (0x%02h)", ir_value);
+            end else begin
+                $display("    ✗ IR load verification FAILED - ir_latch: 0x%02h, expected: 0x%02h",
+                         `JTAG_IR_LATCH, ir_value);
+            end
+
+            // Both verifications must pass
+            last_verification_result = capture_passed && load_passed;
+
+            // Debug info
+            $display("    Debug: ir_out=0x%02h, tap_state=0x%h", `JTAG_IR_OUT, `JTAG_TAP_STATE);
         end
     endtask
 
@@ -667,6 +690,7 @@ module system_tb;
             read_data = 32'h0;
             for (i = 0; i < 32; i = i + 1) begin
                 jtag_pin2_i = 1'b0;
+                jtag_pin1_i = (i == 31) ? 1 : 0;  // TMS=1 on last bit to exit
                 wait_tck();
                 read_data = {jtag_pin3_o, read_data[31:1]};
             end
@@ -703,29 +727,39 @@ module system_tb;
             $display("  Reading and verifying DMI register 0x%02h...", address);
 
             // Build DMI command (read operation)
-            dmi_cmd = {address, 32'h0, 2'b10};  // Read operation
+            dmi_cmd = {address, 32'h0, 2'b10};  // Read operation (10 = read, 01 = write)
 
             // Load DMI instruction (0x11)
-            write_ir(8'h11);
+            write_ir_with_verify(5'h11);
 
             // Go to DR scan
             jtag_pin1_i = 0;
             wait_tck();
-            jtag_pin1_i = 1;  // Select DR
+
+            // Go to Select-DR (TMS=1)
+            jtag_pin1_i = 1;
             wait_tck();
-            jtag_pin1_i = 0;  // Capture DR
+
+            // Go to Capture-DR (TMS=1)
+            jtag_pin1_i = 0;
             wait_tck();
 
             // Shift 41-bit DMI command
             read_data = 41'h0;
             for (i = 0; i < 41; i = i + 1) begin
                 jtag_pin2_i = dmi_cmd[i];
+                jtag_pin1_i = (i == 40) ? 1 : 0;  // TMS=1 on last bit to exit
                 wait_tck();
-                read_data[i] = jtag_pin3_o;
+                read_data = {jtag_pin3_o, read_data[40:1]};
             end
 
-            // Extract register data (bits 33:2)
-            reg_data = read_data[33:2];
+            // Update-DR (TMS=1 from Exit1-DR)
+            jtag_pin1_i = 1;
+            wait_tck();
+
+            // Return to Run-Test/Idle (TMS=0 from Update-DR)
+            jtag_pin1_i = 0;
+            wait_tck();
 
             $display("    Register Read: 0x%08h", reg_data);
             $display("    Expected:      0x%08h", expected_value);
@@ -738,12 +772,6 @@ module system_tb;
                 $display("    ✗ DMI register verification FAILED");
                 last_verification_result = 1'b0;
             end
-
-            // Exit DR scan
-            jtag_pin1_i = 1;
-            wait_tck();
-            jtag_pin1_i = 0;  // Update DR
-            wait_tck();
         end
     endtask
 
@@ -804,7 +832,7 @@ module system_tb;
             $display("    Results: JTAG operations: %0d/10 passed, cJTAG attempts: %0d/10", jtag_successes, cjtag_attempts);
 
             // Test passes if JTAG mode works consistently
-            if (jtag_successes >= 8 && cjtag_attempts >=8) begin  // Allow some margin for timing
+            if (jtag_successes >= 8 && cjtag_attempts >=8) begin
                 $display("    ✓ Protocol switching stress test PASSED - JTAG mode stable during switching");
                 last_verification_result = 1'b1;
             end else begin
@@ -980,7 +1008,7 @@ module system_tb;
             $display("    Alternating pattern test completed (%0d/18 total passed)", successful_operations);
 
             // Set overall test result - pass if most operations succeed
-            if (successful_operations >= 15) begin  // Allow some margin (15/18 = 83%)
+            if (successful_operations == 18) begin
                 $display("    ✓ Comprehensive register pattern test PASSED (%0d/18 operations successful)", successful_operations);
                 last_verification_result = 1'b1;
             end else begin

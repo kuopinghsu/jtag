@@ -58,6 +58,9 @@ module jtag_tb;
     // Global variable to track verification results from tasks
     logic last_verification_result = 1'b0;
 
+    logic check1 = 1'b0;
+    logic check2 = 1'b0;
+
     // Task to record failed test
     task record_failed_test(input integer test_num, input string test_name);
         if (failed_test_count < MAX_TESTS) begin
@@ -104,6 +107,10 @@ module jtag_tb;
     );
 
     // DMI response logic - simple auto-response for testing
+    // Returns predictable test patterns based on DMI address to verify
+    // proper DMI read operations. Each address returns a unique 32-bit pattern
+    // to allow validation of address decoding and data path integrity.
+    // This matches the pattern implementation in jtag_vpi_top.sv.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             dmi_rdata <= 0;
@@ -113,7 +120,16 @@ module jtag_tb;
             dmi_req_ready <= 1'b1;  // Always ready
             dmi_resp <= DMI_RESP_SUCCESS;
             if (dmi_req_valid) begin
-                dmi_rdata <= 32'hDEADBEEF;  // Return dummy data
+                // Return predictable test patterns based on address
+                case (dmi_addr)
+                    7'h00: dmi_rdata <= 32'hA5A5A5A5;            // Pattern 0
+                    7'h01: dmi_rdata <= 32'hAA55AA55;            // Pattern 1
+                    7'h02: dmi_rdata <= 32'h55AA55AA;            // Pattern 2 - Used by Test 10
+                    7'h03: dmi_rdata <= 32'hFF00FF00;            // Pattern 3
+                    7'h04: dmi_rdata <= 32'h00FF00FF;            // Pattern 4
+                    7'h05: dmi_rdata <= 32'hACACACAC;            // Pattern 5 - Used by Test 10
+                    default: dmi_rdata <= {dmi_addr, dmi_addr, dmi_addr, dmi_addr, 4'h0};  // Address-based pattern
+                endcase
             end
         end
     end
@@ -141,55 +157,16 @@ module jtag_tb;
         $display("\nTest 1: TAP Controller Reset");
         test_count = test_count + 1;
         reset_tap();
-        begin
-            logic [31:0] verify_idcode;
-            logic test_1_passed;
-
-            // Verify reset worked by reading IDCODE
-            $display("  Verifying TAP reset by reading IDCODE...");
-
-            // Go to Run-Test/Idle
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Select DR path (TMS=1) - IDCODE should be default instruction
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Go to Capture-DR (TMS=0)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Shift IDCODE (shift 32 bits)
-            verify_idcode = 32'h0;
-            for (integer i = 0; i < 32; i = i + 1) begin
-                jtag_pin2_i = 1'b0;
-                jtag_pin1_i = (i == 31) ? 1 : 0;  // TMS=1 on last bit to exit
-                wait_tck();
-                // Small delay to ensure TDO is stable
-                #1;
-                verify_idcode = {jtag_pin3_o, verify_idcode[31:1]};
-            end
-
-            // Exit shift state
-            jtag_pin1_i = 1;
-            wait_tck();
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Check if IDCODE matches expected value
-            test_1_passed = (verify_idcode == JTAG_IDCODE);
-
-            if (test_1_passed) begin
-                $display("  ✓ TAP reset verification PASSED - IDCODE: 0x%08h", verify_idcode);
-                pass_count = pass_count + 1;
-            end else begin
-                $display("  ✗ TAP reset verification FAILED - Expected: 0x%08h, Got: 0x%08h", JTAG_IDCODE, verify_idcode);
-                fail_count = fail_count + 1;
-                record_failed_test(1, "TAP Controller Reset");
-            end
+        read_idcode_with_check(32'h1DEAD3FF);
+        if (last_verification_result) begin
+            $display("  ✓ TAP reset verification PASSED - IDCODE verification successful");
+            pass_count = pass_count + 1;
+        end else begin
+            $display("  ✗ TAP reset verification FAILED - IDCODE verification failed");
+            fail_count = fail_count + 1;
+            record_failed_test(1, "TAP Controller Reset");
         end
-        #200;
+        #500;
 
         // Test 2: Read IDCODE (DR scan via default instruction)
         $display("\nTest 2: Read IDCODE (DR scan)");
@@ -208,7 +185,7 @@ module jtag_tb;
         // Test 3: IR Scan - Load BYPASS instruction
         $display("\nTest 3: IR Scan - Load BYPASS");
         test_count = test_count + 1;
-        write_ir_with_verify(8'h1F);  // BYPASS instruction (5-bit: 0x1F)
+        write_ir_with_verify(5'h1F);  // BYPASS instruction (5-bit: 0x1F)
         if (last_verification_result) begin
             pass_count = pass_count + 1;
             $display("    ✓ Test 3 PASSED - BYPASS IR instruction loaded successfully");
@@ -223,7 +200,7 @@ module jtag_tb;
         $display("\nTest 4: DR Scan - BYPASS register test");
         test_count = test_count + 1;
         reset_tap();  // Reset TAP to ensure clean state
-        write_ir_with_verify(8'h1F);  // Reload BYPASS after reset (5-bit: 0x1F)
+        write_ir_with_verify(5'h1F);  // Reload BYPASS after reset (5-bit: 0x1F)
         test_bypass();
         if (last_verification_result) begin
             pass_count = pass_count + 1;
@@ -238,7 +215,7 @@ module jtag_tb;
         // Test 5: IR Scan - Load IDCODE instruction
         $display("\nTest 5: IR Scan - Load IDCODE instruction");
         test_count = test_count + 1;
-        write_ir_with_verify(8'h01);  // Explicitly load IDCODE instruction
+        write_ir_with_verify(5'h01);  // Explicitly load IDCODE instruction
         if (last_verification_result) begin
             pass_count = pass_count + 1;
             $display("    ✓ Test 5 PASSED - IDCODE IR instruction loaded successfully");
@@ -266,7 +243,7 @@ module jtag_tb;
         // Test 7: IR Scan - Load DTMCS instruction
         $display("\nTest 7: IR Scan - Load DTMCS instruction");
         test_count = test_count + 1;
-        write_ir_with_verify(8'h10);  // DTMCS instruction
+        write_ir_with_verify(5'h10);  // DTMCS instruction
         if (last_verification_result) begin
             pass_count = pass_count + 1;
             $display("    ✓ Test 7 PASSED - DTMCS IR instruction loaded successfully");
@@ -294,7 +271,7 @@ module jtag_tb;
         // Test 9: IR Scan - Load DMI instruction
         $display("\nTest 9: IR Scan - Load DMI instruction");
         test_count = test_count + 1;
-        write_ir_with_verify(8'h11);  // DMI instruction
+        write_ir_with_verify(5'h11);  // DMI instruction
         if (last_verification_result) begin
             pass_count = pass_count + 1;
             $display("    ✓ Test 9 PASSED - DMI IR instruction loaded successfully");
@@ -308,8 +285,11 @@ module jtag_tb;
         // Test 10: DR Scan - Read DMI register (41 bits)
         $display("\nTest 10: DR Scan - Read DMI register");
         test_count = test_count + 1;
-        read_dmi();
-        if (last_verification_result) begin
+        read_dm_register_with_check(7'h02, 32'h55AA55AA);
+        check1 = last_verification_result;
+        read_dm_register_with_check(7'h05, 32'hACACACAC);
+        check2 = last_verification_result;
+        if (check1 && check2) begin
             pass_count = pass_count + 1;
             $display("    ✓ Test 10 PASSED - DMI register read successful");
         end else begin
@@ -331,14 +311,12 @@ module jtag_tb;
             record_failed_test(11, "cJTAG Mode - Read IDCODE");
             $display("    ✗ Test 11 FAILED - cJTAG IDCODE verification failed");
         end
-
         #500;
 
         // Return to JTAG mode
         $display("\nTest 12: Return to JTAG mode");
         test_count = test_count + 1;
         mode_select = 0;
-        #200;
         $display("Returned to JTAG mode, Active Mode: %s", active_mode ? "cJTAG" : "JTAG");
         // Verify JTAG still works after mode switch
         reset_tap();
@@ -632,37 +610,37 @@ module jtag_tb;
             jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
 
             // Go to DR scan for IDCODE (should be default after reset)
-        // But let's explicitly load IDCODE instruction first
+            // But let's explicitly load IDCODE instruction first
 
-        // Go to IR scan to load IDCODE instruction
-        tms_bit = 1; tdi_bit = 0;  // Select-DR to Select-IR
-        jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
-        jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
-
-        // Enter Capture-IR (TMS=0)
-        tms_bit = 0; tdi_bit = 0;
-        jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
-        jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
-
-        // Shift IDCODE instruction (0x01) - 5 bits
-        for (j = 0; j < 5; j = j + 1) begin
-            tms_bit = (j == 4) ? 1 : 0;  // Exit on last bit
-            tdi_bit = (j == 0) ? 1 : 0;  // Send 0x01 (bit 0 = 1, others = 0)
+            // Go to IR scan to load IDCODE instruction
+            tms_bit = 1; tdi_bit = 0;  // Select-DR to Select-IR
             jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
             jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
-        end
 
-        // Update-IR (TMS=1 from Exit1-IR)
-        tms_bit = 1; tdi_bit = 0;
-        jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
-        jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
+            // Enter Capture-IR (TMS=0)
+            tms_bit = 0; tdi_bit = 0;
+            jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
+            jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
 
-        // Return to Run-Test-Idle (TMS=0)
-        tms_bit = 0; tdi_bit = 0;
-        jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
-        jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
+            // Shift IDCODE instruction (0x01) - 5 bits
+            for (j = 0; j < 5; j = j + 1) begin
+                tms_bit = (j == 4) ? 1 : 0;  // Exit on last bit
+                tdi_bit = (j == 0) ? 1 : 0;  // Send 0x01 (bit 0 = 1, others = 0)
+                jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
+                jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
+            end
 
-        // Now go to DR scan for IDCODE
+            // Update-IR (TMS=1 from Exit1-IR)
+            tms_bit = 1; tdi_bit = 0;
+            jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
+            jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
+
+            // Return to Run-Test-Idle (TMS=0)
+            tms_bit = 0; tdi_bit = 0;
+            jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
+            jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
+
+            // Now go to DR scan for IDCODE
             tms_bit = 1; tdi_bit = 0;
             jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
             jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
@@ -729,7 +707,7 @@ module jtag_tb;
             if (cjtag_idcode == JTAG_IDCODE) begin
                 $display("    ✓ cJTAG IDCODE verification PASSED - Exact match");
                 last_verification_result = 1'b1;
-            end else if (cjtag_working && cjtag_idcode != 32'h0) begin
+            end else if (cjtag_working && cjtag_idcode != JTAG_IDCODE) begin
                 $display("    ✗ cJTAG IDCODE verification FAILED - Got valid cJTAG response");
                 last_verification_result = 1'b0;
             end else if (active_mode) begin
@@ -743,7 +721,7 @@ module jtag_tb;
     endtask
 
     // Task to write instruction register with verification
-    task write_ir_with_verify(input [7:0] instruction);
+    task write_ir_with_verify(input [4:0] instruction);
         integer i;
         logic [4:0] captured_ir;
         logic [4:0] ir_value;
@@ -879,62 +857,6 @@ module jtag_tb;
         end
     endtask
 
-    // Task to write instruction register (IR scan)
-    // Fixed for 5-bit IR register (was incorrectly shifting 8 bits)
-    task write_ir(input [7:0] instruction);
-        integer i;
-        logic [4:0] captured_ir;  // Changed to 5-bit to match hardware
-        logic [4:0] ir_value;     // Mask input to 5 bits
-        begin
-
-            // Mask instruction to 5 bits to match hardware
-            ir_value = instruction[4:0];
-            $display("  Writing IR: 0x%02h (masked to 5-bit: 0x%02h)", instruction, ir_value);
-
-            // Go to Run-Test/Idle
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Select IR path (TMS=1, TMS=1)
-            jtag_pin1_i = 1;
-            wait_tck();
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Go to Capture-IR (TMS=0)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Transition from Capture-IR to Shift-IR (TMS=0)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Shift-IR state - shift all 5 bits with TMS=0
-            captured_ir = 5'h0;
-            for (i = 0; i < 5; i = i + 1) begin
-                jtag_pin2_i = ir_value[i];
-                jtag_pin1_i = (i == 4) ? 1 : 0;  // TMS=1 on last bit to exit
-                captured_ir = {jtag_pin3_o, captured_ir[4:1]};
-                wait_tck();
-            end
-            $display("    Captured IR: 0x%02h", captured_ir);
-
-            // Now in Exit1-IR state, go to Update-IR (TMS=1)
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Return to Run-Test/Idle (TMS=0 from Update-IR)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Stay in Run-Test/Idle for a few cycles to let instruction take effect
-            repeat(5) wait_tck();
-
-            // Mark this test as pass (successful IR shift)
-            $display("    IR write complete - PASSED");
-        end
-    endtask
-
     // Task to test BYPASS register
     task test_bypass();
         integer i;
@@ -942,11 +864,10 @@ module jtag_tb;
         logic tdo_bit, expected_tdo;
         integer pass_count_local;
         begin
-
             $display("  Testing BYPASS register...");
             test_pattern = 8'b10110011;
             pass_count_local = 0;
-            expected_tdo = 1'b0;  // Initial bypass register state (should be 0)
+            expected_tdo = 1'b0;  // Initial bypass register state after Capture-DR
 
             // Start from Run-Test/Idle
             jtag_pin1_i = 0;
@@ -960,28 +881,56 @@ module jtag_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            // Shift test pattern through BYPASS - each bit shifts through the 1-bit register
+            // Transition to Shift-DR (TMS=0)
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Shift test pattern through BYPASS - need 9 shifts to verify all 8 bits
+            // (1 to get captured value, 8 to push all input bits through)
             $display("    Shifting pattern: 0b%08b", test_pattern);
-            for (i = 0; i < 8; i = i + 1) begin
-                jtag_pin2_i = test_pattern[i];
-                if (i < 7) begin
-                    jtag_pin1_i = 0;  // Stay in Shift-DR for first 7 bits
+            for (i = 0; i < 9; i = i + 1) begin
+                // For first 8 shifts, send pattern bits; for 9th shift, send 0
+                if (i < 8) begin
+                    jtag_pin2_i = test_pattern[i];
                 end else begin
-                    jtag_pin1_i = 1;  // Exit on last bit
+                    jtag_pin2_i = 1'b0;  // Dummy bit to push last pattern bit out
                 end
+
+                if (i < 8) begin
+                    jtag_pin1_i = 0;  // Stay in Shift-DR for first 8 bits
+                end else begin
+                    jtag_pin1_i = 1;  // Exit on 9th bit
+                end
+
+                // Clock edge happens here - TDI shifts in, TDO shifts out
                 wait_tck();
-                #1; // Small delay for TDO stability
+
+                // Sample TDO after the clock edge
+                #1;
                 tdo_bit = jtag_pin3_o;
 
-                // BYPASS should output what was in the register before this shift
-                // The register contains the previous TDI bit
+                // Compare with expected
                 if (tdo_bit == expected_tdo) begin
                     pass_count_local = pass_count_local + 1;
-                    $display("      Bit %0d: TDI=%0b, TDO=%0b ✓", i, test_pattern[i], tdo_bit);
+                    if (i < 8) begin
+                        $display("      Bit %0d: TDI=%0b, TDO=%0b (expected=%0b) ✓", i, test_pattern[i], tdo_bit, expected_tdo);
+                    end else begin
+                        $display("      Bit %0d: TDI=0 (dummy), TDO=%0b (expected=%0b) ✓", i, tdo_bit, expected_tdo);
+                    end
                 end else begin
-                    $display("      Bit %0d: TDI=%0b, TDO=%0b ✗ (expected=%0b)", i, test_pattern[i], tdo_bit, expected_tdo);
+                    if (i < 8) begin
+                        $display("      Bit %0d: TDI=%0b, TDO=%0b (expected=%0b) ✗", i, test_pattern[i], tdo_bit, expected_tdo);
+                    end else begin
+                        $display("      Bit %0d: TDI=0 (dummy), TDO=%0b (expected=%0b) ✗", i, tdo_bit, expected_tdo);
+                    end
                 end
-                expected_tdo = test_pattern[i];  // Next TDO should be current TDI
+
+                // Update expected TDO for next iteration
+                if (i < 8) begin
+                    expected_tdo = test_pattern[i];
+                end else begin
+                    expected_tdo = 1'b0;  // After dummy bit
+                end
             end
 
             // Update-DR (TMS=1 from Exit1-DR)
@@ -992,18 +941,19 @@ module jtag_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            if (pass_count_local >= 8) begin    // All bits correct
-                $display("    ✓ BYPASS test PASSED (%0d/8 bits correct)", pass_count_local);
+            // Check for 9 correct comparisons (captured 0 + pattern[0:7])
+            if (pass_count_local >= 9) begin
+                $display("    ✓ BYPASS test PASSED (%0d/9 bits correct)", pass_count_local);
                 last_verification_result = 1'b1;
             end else begin
-                $display("    ✗ BYPASS test FAILED (%0d/8 bits correct)", pass_count_local);
+                $display("    ✗ BYPASS test FAILED (%0d/9 bits correct)", pass_count_local);
                 last_verification_result = 1'b0;
             end
         end
     endtask
 
     // Task to read DMI register (41 bits) with proper DMI operation
-    task read_dmi();
+    task read_dm_register_with_check(input [6:0] address, input [31:0] expected_value);
         integer i;
         logic [40:0] write_data, read_data;
         logic [6:0] dmi_addr_test;
@@ -1013,9 +963,9 @@ module jtag_tb;
             $display("  Reading 41-bit DMI register with proper DMI operation...");
 
             // Step 1: Write a DMI read command to address 0x11 (DMSTATUS)
-            dmi_addr_test = 7'h11;  // DMSTATUS register address
-            dmi_data_test = 32'h0;  // Don't care for read
-            dmi_op_test = 2'h2;     // DMI read operation
+            dmi_addr_test = address;        // DMSTATUS register address
+            dmi_data_test = expected_value; // DMI Data
+            dmi_op_test   = 2'b10;          // DMI read operation (01 = write, 10 = read)
 
             // Construct 41-bit DMI command: [addr:7][data:32][op:2]
             write_data = {dmi_addr_test, dmi_data_test, dmi_op_test};
@@ -1094,15 +1044,11 @@ module jtag_tb;
             // - Address should match what we requested (0x11)
             // - Op should be 0 (success) or 2 (in progress)
             // - Data should be non-zero (DMSTATUS has defined bits)
-            if (dmi_addr_test == 7'h11 && (dmi_op_test == 2'h0 || dmi_op_test == 2'h2) && dmi_data_test != 32'h0) begin
+            if (dmi_addr_test == address && (dmi_op_test == 2'h0 || dmi_op_test == 2'h2) && dmi_data_test == expected_value) begin
                 $display("    ✓ DMI register operation successful - proper DMI transaction");
                 last_verification_result = 1'b1;
-            end else if (read_data != 41'h0) begin
-                // At least we got some response, even if not perfect
-                $display("    ✓ DMI register operation successful - got non-zero response");
-                last_verification_result = 1'b1;
             end else begin
-                $display("    ✗ DMI register operation failed - zero response");
+                $display("    ✗ DMI register operation failed");
                 last_verification_result = 1'b0;
             end
         end
@@ -1208,8 +1154,8 @@ module jtag_tb;
             jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
 
             // Verify we got some response indicating cJTAG protocol is active
-            if (cjtag_test_idcode != 32'h0 || jtag_pin1_oen) begin
-                $display("    ✓ OAC detection test PASSED - cJTAG protocol response detected (partial IDCODE: 0x%02h)", cjtag_test_idcode[7:0]);
+            if (cjtag_test_idcode == JTAG_IDCODE) begin
+                $display("    ✓ OAC detection test PASSED - cJTAG protocol response detected");
                 last_verification_result = 1'b1;
             end else begin
                 $display("    ✗ OAC detection test FAILED - No cJTAG response detected");
@@ -1320,12 +1266,12 @@ module jtag_tb;
             $display("    ✓ JScan OSCAN_OFF command sent - JScan test completed");
 
             // Verify JScan command processing based on actual SF0 response
-            if (sf0_activity_detected && sf0_captured_data != 8'h0) begin
+            if (sf0_activity_detected && sf0_captured_data != 8'h0) begin // FIXME
                 $display("    ✓ JScan command processing test PASSED - SF0 data captured: 0x%02h", sf0_captured_data);
                 last_verification_result = 1'b1;
             end else if (sf0_activity_detected) begin
                 $display("    ⚠ JScan command processing test - SF0 activity detected but no data");
-                last_verification_result = 1'b1;  // Still pass as activity detected
+                last_verification_result = 1'b0;
             end else begin
                 $display("    ✗ JScan command processing test FAILED - No SF0 activity detected");
                 last_verification_result = 1'b0;
@@ -1389,9 +1335,9 @@ module jtag_tb;
             $display("    SF0 pattern sent: 0x%02h", sf0_pattern);
             $display("    TDO captured:    0x%02h", sf0_tdo_captured);
 
-            // Verify we captured some response (not all zeros unless expected)
-            if (sf0_tdo_captured != 8'h00 || jtag_pin1_oen) begin
-                $display("    ✓ SF0 protocol test PASSED - TDO activity detected");
+            // Verify we captured some response
+            if (sf0_tdo_captured == sf0_pattern) begin
+                $display("    ✓ SF0 protocol test PASSED - TDO activity matches expected patterns");
                 last_verification_result = 1'b1;
             end else begin
                 $display("    ✗ SF0 protocol test FAILED - No TDO activity detected");
@@ -1791,7 +1737,7 @@ module jtag_tb;
             read_idcode_with_check(32'h1DEAD3FF);
 
             // Final evaluation
-            if (cjtag_idcode == JTAG_IDCODE || cjtag_idcode != 32'h0) begin
+            if (cjtag_idcode == JTAG_IDCODE) begin
                 $display("    ✓ Full cJTAG protocol test PASSED");
                 $display("      - OAC sequence: Generated successfully");
                 $display("      - JScan commands: OSCAN_ON/OSCAN_OFF sent");
