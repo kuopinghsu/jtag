@@ -37,6 +37,13 @@ module jtag_tb;
     wire [31:0] idcode;
     wire       active_mode;
 
+    localparam JTAG_IDCODE = 32'h1DEAD3FF;
+
+    // JTAG module path definitions for easier signal access
+    `define JTAG_IR_LATCH    dut.ir_reg.ir_latch
+    `define JTAG_IR_OUT      dut.ir_reg.ir_out
+    `define JTAG_TAP_STATE   dut.tap_ctrl.state
+
     // Test tracking variables
     integer test_count = 0;
     integer pass_count = 0;
@@ -59,12 +66,6 @@ module jtag_tb;
             failed_test_count = failed_test_count + 1;
         end
     endtask
-
-    // JTAG module path definitions for easier signal access
-    `define JTAG_IR_LATCH    dut.ir_reg.ir_latch
-    `define JTAG_IR_OUT      dut.ir_reg.ir_out
-    `define JTAG_IDCODE      dut.idcode
-    `define JTAG_TAP_STATE   dut.tap_ctrl.state
 
     // Clock generation
     initial begin
@@ -177,13 +178,13 @@ module jtag_tb;
             wait_tck();
 
             // Check if IDCODE matches expected value
-            test_1_passed = (verify_idcode == dut.idcode);
+            test_1_passed = (verify_idcode == JTAG_IDCODE);
 
             if (test_1_passed) begin
                 $display("  ✓ TAP reset verification PASSED - IDCODE: 0x%08h", verify_idcode);
                 pass_count = pass_count + 1;
             end else begin
-                $display("  ✗ TAP reset verification FAILED - Expected: 0x%08h, Got: 0x%08h", dut.idcode, verify_idcode);
+                $display("  ✗ TAP reset verification FAILED - Expected: 0x%08h, Got: 0x%08h", JTAG_IDCODE, verify_idcode);
                 fail_count = fail_count + 1;
                 record_failed_test(1, "TAP Controller Reset");
             end
@@ -585,7 +586,7 @@ module jtag_tb;
 
     // Task to perform proper cJTAG IDCODE read
     task test_cjtag_idcode_read();
-        integer i;
+        integer i, j;
         logic [31:0] cjtag_idcode;
         logic [3:0] jscan_cmd;
         logic tms_bit, tdi_bit, tdo_captured;
@@ -631,7 +632,37 @@ module jtag_tb;
             jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
 
             // Go to DR scan for IDCODE (should be default after reset)
-            // Enter Select-DR-Scan (TMS=1)
+        // But let's explicitly load IDCODE instruction first
+
+        // Go to IR scan to load IDCODE instruction
+        tms_bit = 1; tdi_bit = 0;  // Select-DR to Select-IR
+        jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
+        jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
+
+        // Enter Capture-IR (TMS=0)
+        tms_bit = 0; tdi_bit = 0;
+        jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
+        jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
+
+        // Shift IDCODE instruction (0x01) - 5 bits
+        for (j = 0; j < 5; j = j + 1) begin
+            tms_bit = (j == 4) ? 1 : 0;  // Exit on last bit
+            tdi_bit = (j == 0) ? 1 : 0;  // Send 0x01 (bit 0 = 1, others = 0)
+            jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
+            jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
+        end
+
+        // Update-IR (TMS=1 from Exit1-IR)
+        tms_bit = 1; tdi_bit = 0;
+        jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
+        jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
+
+        // Return to Run-Test-Idle (TMS=0)
+        tms_bit = 0; tdi_bit = 0;
+        jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
+        jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
+
+        // Now go to DR scan for IDCODE
             tms_bit = 1; tdi_bit = 0;
             jtag_pin1_i = tms_bit; jtag_pin0_i = 1; #25;
             jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
@@ -655,17 +686,20 @@ module jtag_tb;
                 jtag_pin0_i = 1;
                 #25;
 
+                // Wait for potential TDO response (give more time)
+                #25;
+
                 // Sample TDO if available (check both output enable and data)
                 if (jtag_pin1_oen == 1'b0) begin  // oen is active low
                     tdo_captured = jtag_pin1_o;
-                    cjtag_idcode[i] = tdo_captured;
+                    cjtag_idcode = {tdo_captured, cjtag_idcode[31:1]};  // Shift right (LSB first)
                     cjtag_working = 1'b1;  // We got some activity
                     if (i < 8 || i > 23) begin  // Show first/last 8 bits for debug
                         $display("      IDCODE bit %02d: TMS=%b, TDO=%b (captured)", i, tms_bit, tdo_captured);
                     end
                 end else begin
                     // No output, use zero
-                    cjtag_idcode[i] = 1'b0;
+                    cjtag_idcode = {1'b0, cjtag_idcode[31:1]};  // Shift right with zero
                     if (i < 4) begin  // Show first few bits for debug
                         $display("      IDCODE bit %02d: TMS=%b, TDO=0 (no output)", i, tms_bit);
                     end
@@ -689,10 +723,10 @@ module jtag_tb;
 
             // Check results
             $display("    cJTAG IDCODE: 0x%08h", cjtag_idcode);
-            $display("    Expected:     0x%08h", dut.idcode);
+            $display("    Expected:     0x%08h", JTAG_IDCODE);
 
             // More lenient verification - check if we got valid cJTAG activity
-            if (cjtag_idcode == dut.idcode) begin
+            if (cjtag_idcode == JTAG_IDCODE) begin
                 $display("    ✓ cJTAG IDCODE verification PASSED - Exact match");
                 last_verification_result = 1'b1;
             end else if (cjtag_working && cjtag_idcode != 32'h0) begin
@@ -958,11 +992,11 @@ module jtag_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            if (pass_count_local >= 8) begin   // All bits correct
+            if (pass_count_local >= 8) begin    // All bits correct
                 $display("    ✓ BYPASS test PASSED (%0d/8 bits correct)", pass_count_local);
                 last_verification_result = 1'b1;
             end else begin
-                $display("    ✓ BYPASS test PASSED (%0d/8 bits correct) - acceptable for BYPASS", pass_count_local);
+                $display("    ✗ BYPASS test FAILED (%0d/8 bits correct)", pass_count_local);
                 last_verification_result = 1'b0;
             end
         end
@@ -1450,7 +1484,7 @@ module jtag_tb;
             end
             jtag_pin1_i = 1; wait_tck();  // Exit
             jtag_pin1_i = 0; wait_tck();
-            jtag_mode_verified = (jtag_idcode_1 != 32'h0);  // Any non-zero response indicates JTAG working
+            jtag_mode_verified = (jtag_idcode_1 == JTAG_IDCODE);  // Must match exact expected IDCODE
             $display("      JTAG mode IDCODE: 0x%08h", jtag_idcode_1);
 
             $display("    Switching to cJTAG mode...");
@@ -1496,19 +1530,20 @@ module jtag_tb;
             $display("      - JTAG mode verified: %s", jtag_mode_verified ? "PASS" : "FAIL");
             $display("      - cJTAG mode verified: %s", cjtag_mode_verified ? "PASS" : "FAIL");
             $display("      - IDCODE consistency: %s", (jtag_idcode_1 == jtag_idcode_2) ? "PASS" : "FAIL");
-            $display("      - IDCODE non-zero: %s", (jtag_idcode_1 != 32'h0) ? "PASS" : "FAIL");
+            $display("      - IDCODE exact match: %s", (jtag_idcode_1 == JTAG_IDCODE && jtag_idcode_2 == JTAG_IDCODE) ? "PASS" : "FAIL");
 
             // Pass only if all critical conditions are met
             if (jtag_mode_verified && cjtag_mode_verified &&
-                (jtag_idcode_1 == jtag_idcode_2) && (jtag_idcode_1 != 32'h0)) begin
-                $display("    ✓ Protocol switching test PASSED - All modes functional, IDCODE consistent");
+                (jtag_idcode_1 == jtag_idcode_2) && (jtag_idcode_1 == JTAG_IDCODE)) begin
+                $display("    ✓ Protocol switching test PASSED - All modes functional, IDCODE exactly correct");
                 last_verification_result = 1'b1;
             end else begin
                 $display("    ✗ Protocol switching test FAILED - One or more conditions not met");
                 if (!jtag_mode_verified) $display("      → JTAG mode verification failed");
                 if (!cjtag_mode_verified) $display("      → cJTAG mode verification failed");
                 if (jtag_idcode_1 != jtag_idcode_2) $display("      → IDCODE inconsistent before/after mode switch");
-                if (jtag_idcode_1 == 32'h0) $display("      → IDCODE is zero (invalid)");
+                if (jtag_idcode_1 != JTAG_IDCODE) $display("      → First IDCODE incorrect (got 0x%08h, expected 0x1DEAD3FF)", jtag_idcode_1);
+                if (jtag_idcode_2 != JTAG_IDCODE) $display("      → Second IDCODE incorrect (got 0x%08h, expected 0x1DEAD3FF)", jtag_idcode_2);
                 last_verification_result = 1'b0;
             end
         end
@@ -1590,7 +1625,7 @@ module jtag_tb;
             jtag_pin1_i = 1; wait_tck();  // Exit
             jtag_pin1_i = 0; wait_tck();
 
-            if (boundary_idcode == dut.idcode) begin
+            if (boundary_idcode == JTAG_IDCODE) begin
                 $display("    ✓ Boundary conditions test PASSED - System recovered properly");
                 last_verification_result = 1'b1;
             end else begin
@@ -1725,7 +1760,7 @@ module jtag_tb;
             jtag_pin1_i = tdi_bit; jtag_pin0_i = 0; #25;
 
             $display("      cJTAG IDCODE captured: 0x%08h", cjtag_idcode);
-            $display("      Expected IDCODE:       0x%08h", dut.idcode);
+            $display("      Expected IDCODE:       0x%08h", JTAG_IDCODE);
 
             // Step 5: Exit OScan1 mode via JScan OSCAN_OFF
             $display("    Step 5: Sending JScan OSCAN_OFF command");
@@ -1756,7 +1791,7 @@ module jtag_tb;
             read_idcode_with_check(32'h1DEAD3FF);
 
             // Final evaluation
-            if (cjtag_idcode == dut.idcode || cjtag_idcode != 32'h0) begin
+            if (cjtag_idcode == JTAG_IDCODE || cjtag_idcode != 32'h0) begin
                 $display("    ✓ Full cJTAG protocol test PASSED");
                 $display("      - OAC sequence: Generated successfully");
                 $display("      - JScan commands: OSCAN_ON/OSCAN_OFF sent");

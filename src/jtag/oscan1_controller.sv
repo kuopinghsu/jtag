@@ -264,17 +264,15 @@ module oscan1_controller #(
             sf0_packet_ready <= 1'b0;
         end else begin
             if (state == OSCAN_SF0) begin
-                if (tckc_rising && !zero_deleted) begin
-                    // TMS bit
+                if (tckc_rising) begin
+                    // TMS bit on rising edge
                     sf0_bits[1] <= tmsc_in;
                     sf0_bit_count <= 1'b1;
                     sf0_packet_ready <= 1'b0;
-                end else if (tckc_falling && !zero_deleted) begin
-                    // TDI bit
-                    sf0_bits[0] <= tmsc_sample;
-                    if (sf0_bit_count) begin
-                        sf0_packet_ready <= 1'b1;
-                    end
+                end else if (tckc_falling && sf0_bit_count) begin
+                    // TDI bit on falling edge (only if we got TMS bit)
+                    sf0_bits[0] <= tmsc_in;  // Use current tmsc_in, not delayed sample
+                    sf0_packet_ready <= 1'b1;  // Packet ready after both TMS and TDI
                     sf0_bit_count <= 1'b0;
                 end else if (sf0_packet_ready) begin
                     sf0_packet_ready <= 1'b0;  // Clear after one cycle
@@ -297,12 +295,12 @@ module oscan1_controller #(
             jtag_tdi <= 1'b0;
         end else begin
             if (state == OSCAN_SF0 && sf0_packet_ready) begin
-                // Generate TCK pulse
+                // Generate extended TCK pulse (2 cycles)
                 jtag_tck <= 1'b1;
                 jtag_tms <= sf0_bits[1];
                 jtag_tdi <= sf0_bits[0];
             end else if (jtag_tck) begin
-                jtag_tck <= 1'b0;  // Return TCK to low
+                jtag_tck <= 1'b0;  // Return TCK to low after one cycle
             end
         end
     end
@@ -311,31 +309,32 @@ module oscan1_controller #(
     // TDO Return Path (TMSC Output)
     // ========================================
     // Send TDO back on TMSC when in output mode
+    // SF0 protocol: TDO is captured after TCK rising edge and output during falling edge
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             tdo_bit <= 1'b0;
             tdo_ready <= 1'b0;
             tmsc_out <= 1'b0;
-            tmsc_oen <= 1'b0;
+            tmsc_oen <= 1'b1;      // oen is active low: 1=tristate, 0=output
         end else begin
             if (state == OSCAN_SF0) begin
-                // Capture TDO after TCK rising edge
+                // Capture TDO after TCK pulse is generated
                 if (jtag_tck && !tdo_ready) begin
-                    tdo_bit <= jtag_tdo;
-                    tdo_ready <= 1'b1;
-                end
-
-                // Send TDO on next TCKC rising edge
-                if (tdo_ready && tckc_rising) begin
+                    tdo_bit <= jtag_tdo;  // Capture TDO during TCK high
+                    tdo_ready <= 1'b1;    // Mark TDO as ready for output
+                end else if (!jtag_tck && tdo_ready) begin
+                    // Output TDO during TCK low (TMSC output phase)
                     tmsc_out <= tdo_bit;
-                    tmsc_oen <= 1'b1;  // Enable output
-                    tdo_ready <= 1'b0;
-                end else if (tmsc_oen && tckc_falling) begin
-                    tmsc_oen <= 1'b0;  // Disable output after transfer
+                    tmsc_oen <= 1'b0;     // Enable output (active low)
+                    tdo_ready <= 1'b0;    // Reset for next cycle
+                end else if (!tdo_ready) begin
+                    // Default state when not outputting
+                    tmsc_oen <= 1'b1;     // Tristate (input mode)
+                    tmsc_out <= 1'b0;
                 end
             end else begin
                 tmsc_out <= 1'b0;
-                tmsc_oen <= 1'b0;
+                tmsc_oen <= 1'b1;      // 1 = tristate/input mode (active low)
                 tdo_ready <= 1'b0;
             end
         end

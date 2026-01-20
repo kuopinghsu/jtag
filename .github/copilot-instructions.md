@@ -48,36 +48,12 @@
   - Waveform tracing disabled by default; use `WAVE=fst` or `WAVE=vcd` to enable. `WAVE=1` defaults to FST format.
   - When fixing compiler warnings, preserve protocol behavior; use union pattern for type-safe reinterpretation (see vpi/jtag_vpi_client.c).
   - In Bash scripts with `set -e`, use `VAR=$((VAR + 1))` not `((VAR++))` for arithmetic; latter returns pre-increment value causing premature exit.
+- **EXTREME TESTING RULE**: ALL tests MUST verify exact data correctness. Partial matches, "non-zero" checks, or "close enough" validations are FAILURES:
+  - IDCODE reads: Must be exactly 0x1DEAD3FF, not just non-zero
+  - Register values: Must match expected values exactly (bit-for-bit)
+  - Protocol responses: Must be exact expected patterns, not partial matches
+  - Data integrity: Every bit position must be verified as correct
+  - Test failures: If any data is incorrect, incomplete, or partially matched, the test MUST FAIL with detailed error reporting showing expected vs actual values
+  - No exceptions: Even single-bit errors or "mostly correct" responses are test failures requiring investigation and fixes
 - Useful docs: [README.md](../README.md) for features/commands, [QUICKSTART.md](../QUICKSTART.md) for expected outputs, [docs/PROTOCOL_TESTING.md](../docs/PROTOCOL_TESTING.md) if present, [docs/OPENOCD_VPI_TECHNICAL_GUIDE.md](../docs/OPENOCD_VPI_TECHNICAL_GUIDE.md) for protocol details.
 - File hygiene: RTL uses SystemVerilog; keep ASCII; follow existing module/interface naming. Avoid reverting user changes; prefer `make clean` before rebuild.
-
-## CRITICAL TESTING RULE - NO CHEATING
-
-**NEVER set `last_verification_result = 1'b1` or force a test to pass without proper verification conditions.**
-
-Tests MUST fail when verification conditions are not met. Forcing passes defeats the purpose of testing and is considered fraudulent.
-
-**Always use proper conditional logic:**
-- ✓ CORRECT: `last_verification_result = (actual_result == expected_result);`
-- ✗ WRONG: `last_verification_result = 1'b1; // Force pass`
-- ✗ WRONG: `last_verification_result = 1'b1; // Still pass as...`
-- ✗ WRONG: `last_verification_result = 1'b1; // Pass for...`
-
-**If verification is complex, implement proper checks—don't bypass them.**
-
-Examples of honest test verification:
-```systemverilog
-// CORRECT - Honest verification
-if (read_data == expected_data) begin
-    last_verification_result = 1'b1;
-end else begin
-    last_verification_result = 1'b0;
-end
-
-// WRONG - Cheating by forcing pass
-if (read_data == expected_data) begin
-    last_verification_result = 1'b1;
-end else begin
-    last_verification_result = 1'b1;  // ← CHEATING!
-end
-```
