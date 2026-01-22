@@ -139,12 +139,12 @@ module jtag_dtm (
 `endif
                     end
                     IR_DMI: begin
-                        // Capture previous response and data
+                        // Capture previous operation and data
                         dmi_shift_reg[40:34] <= dmi_addr;        // Address
                         dmi_shift_reg[33:2]  <= dmi_rdata;       // Read data
-                        dmi_shift_reg[1:0]   <= last_response;   // Response
+                        dmi_shift_reg[1:0]   <= dmi_reg[1:0];    // Operation that was performed
 `ifdef VERBOSE
-                        if (`VERBOSE) $display("[DTM] DMI capture: addr=0x%h, data=0x%h, resp=%h", dmi_addr, dmi_rdata, last_response);
+                        if (`VERBOSE) $display("[DTM] DMI capture: addr=0x%h, data=0x%h, op=%h", dmi_addr, dmi_rdata, dmi_reg[1:0]);
 `endif
                     end
                     IR_BYPASS: begin

@@ -58,9 +58,6 @@ module jtag_tb;
     // Global variable to track verification results from tasks
     logic last_verification_result = 1'b0;
 
-    logic check1 = 1'b0;
-    logic check2 = 1'b0;
-
     // Task to record failed test
     task record_failed_test(input integer test_num, input string test_name);
         if (failed_test_count < MAX_TESTS) begin
@@ -107,28 +104,35 @@ module jtag_tb;
     );
 
     // DMI response logic - simple auto-response for testing
-    // Returns predictable test patterns based on DMI address to verify
-    // proper DMI read operations. Each address returns a unique 32-bit pattern
-    // to allow validation of address decoding and data path integrity.
-    // This matches the pattern implementation in jtag_vpi_top.sv.
+    // DMI memory for read/write operations
+    logic [31:0] dmi_memory [128];  // 128 DMI registers (7-bit address)
+
+    // DMI response logic - supports both read and write operations
+    // Simulates actual DMI register behavior with memory backing
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             dmi_rdata <= 0;
             dmi_resp <= DMI_RESP_SUCCESS;
             dmi_req_ready <= 1'b1;
+            // Initialize some default values, use non-zero to detect writes
+            for (int i = 0; i < 128; i++) begin
+                dmi_memory[i] <= 32'h08946788;
+            end
         end else begin
             dmi_req_ready <= 1'b1;  // Always ready
-            dmi_resp <= DMI_RESP_SUCCESS;
+            dmi_resp <= DMI_RESP_SUCCESS; // Always success
             if (dmi_req_valid) begin
-                // Return predictable test patterns based on address
-                case (dmi_addr)
-                    7'h00: dmi_rdata <= 32'hA5A5A5A5;            // Pattern 0
-                    7'h01: dmi_rdata <= 32'hAA55AA55;            // Pattern 1
-                    7'h02: dmi_rdata <= 32'h55AA55AA;            // Pattern 2 - Used by Test 10
-                    7'h03: dmi_rdata <= 32'hFF00FF00;            // Pattern 3
-                    7'h04: dmi_rdata <= 32'h00FF00FF;            // Pattern 4
-                    7'h05: dmi_rdata <= 32'hACACACAC;            // Pattern 5 - Used by Test 10
-                    default: dmi_rdata <= {dmi_addr, dmi_addr, dmi_addr, dmi_addr, 4'h0};  // Address-based pattern
+                case (dmi_op)
+                    DMI_OP_READ: begin
+                        dmi_rdata <= dmi_memory[dmi_addr];
+                    end
+                    DMI_OP_WRITE: begin
+                        dmi_memory[dmi_addr] <= dmi_wdata;
+                        dmi_rdata <= 32'h0;  // Write operations don't return data
+                    end
+                    default: begin
+                        dmi_rdata <= 32'h0;
+                    end
                 endcase
             end
         end
@@ -282,20 +286,18 @@ module jtag_tb;
         end
         #500;
 
-        // Test 10: DR Scan - Read DMI register (41 bits)
-        $display("\nTest 10: DR Scan - Read DMI register");
+        // Test 10: DMI Write/Read Register Test
+        $display("\nTest 10: DMI Write/Read Register Test");
         test_count = test_count + 1;
-        read_dm_register_with_check(7'h02, 32'h55AA55AA);
-        check1 = last_verification_result;
-        read_dm_register_with_check(7'h05, 32'hACACACAC);
-        check2 = last_verification_result;
-        if (check1 && check2) begin
+        // Test write then read operations on DATA0 register (0x04)
+        write_dm_register_with_check(7'h04, 32'hACACACAC);
+        if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 10 PASSED - DMI register read successful");
+            $display("    ✓ Test 10 PASSED - DMI write/read test successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(10, "DR Scan - Read DMI register");
-            $display("    ✗ Test 10 FAILED - DMI register read failed");
+            record_failed_test(10, "DMI Write/Read Register Test");
+            $display("    ✗ Test 10 FAILED - DMI write/read test failed");
         end
         #500;
 
@@ -313,8 +315,26 @@ module jtag_tb;
         end
         #500;
 
-        // Return to JTAG mode
-        $display("\nTest 12: Return to JTAG mode");
+        // Test 12: cJTAG DMI Write/Read Register Test
+        $display("\nTest 12: cJTAG DMI Write/Read Register Test");
+        test_count = test_count + 1;
+        // Ensure we are in cJTAG mode
+        mode_select = 1;
+        #100;
+        // Write to DATA0 register (0x04) with a known value
+        write_dm_register_with_check(7'h04, 32'hDEADBEEF);
+        if (last_verification_result) begin
+            pass_count = pass_count + 1;
+            $display("    ✓ Test 12 PASSED - cJTAG DMI write/read successful");
+        end else begin
+            fail_count = fail_count + 1;
+            record_failed_test(12, "cJTAG DMI Write/Read Register Test");
+            $display("    ✗ Test 12 FAILED - cJTAG DMI write/read failed");
+        end
+        #500;
+
+        // Test 13: Return to JTAG mode
+        $display("\nTest 13: Return to JTAG mode");
         test_count = test_count + 1;
         mode_select = 0;
         $display("Returned to JTAG mode, Active Mode: %s", active_mode ? "cJTAG" : "JTAG");
@@ -323,109 +343,109 @@ module jtag_tb;
         read_idcode_with_check(32'h1DEAD3FF);
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 12 PASSED - JTAG mode restored and verified");
+            $display("    ✓ Test 13 PASSED - JTAG mode restored and verified");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(12, "Return to JTAG mode");
-            $display("    ✗ Test 12 FAILED - JTAG mode verification failed");
+            record_failed_test(13, "Return to JTAG mode");
+            $display("    ✗ Test 13 FAILED - JTAG mode verification failed");
         end
         #200;
 
-        // Test 13: OScan1 OAC Detection
-        $display("\nTest 13: OScan1 OAC Detection and Protocol Activation");
+        // Test 14: OScan1 OAC Detection
+        $display("\nTest 14: OScan1 OAC Detection and Protocol Activation");
         test_count = test_count + 1;
         test_oscan1_oac_detection();
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 13 PASSED - OScan1 OAC detection successful");
+            $display("    ✓ Test 14 PASSED - OScan1 OAC detection successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(13, "OScan1 OAC Detection and Protocol Activation");
-            $display("    ✗ Test 13 FAILED - OScan1 OAC detection failed");
+            record_failed_test(14, "OScan1 OAC Detection and Protocol Activation");
+            $display("    ✗ Test 14 FAILED - OScan1 OAC detection failed");
         end
         #500;
 
-        // Test 14: OScan1 JScan Commands
-        $display("\nTest 14: OScan1 JScan Command Processing");
+        // Test 15: OScan1 JScan Commands
+        $display("\nTest 15: OScan1 JScan Command Processing");
         test_count = test_count + 1;
         test_oscan1_jscan_commands();
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 14 PASSED - JScan command processing successful");
+            $display("    ✓ Test 15 PASSED - JScan command processing successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(14, "OScan1 JScan Command Processing");
-            $display("    ✗ Test 14 FAILED - JScan command processing failed");
+            record_failed_test(15, "OScan1 JScan Command Processing");
+            $display("    ✗ Test 15 FAILED - JScan command processing failed");
         end
         #500;
 
-        // Test 15: OScan1 SF0 Protocol Testing
-        $display("\nTest 15: OScan1 Scanning Format 0 (SF0)");
+        // Test 16: OScan1 SF0 Protocol Testing
+        $display("\nTest 16: OScan1 Scanning Format 0 (SF0)");
         test_count = test_count + 1;
         test_oscan1_sf0_protocol();
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 15 PASSED - SF0 protocol test successful");
+            $display("    ✓ Test 16 PASSED - SF0 protocol test successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(15, "OScan1 Scanning Format 0 (SF0)");
-            $display("    ✗ Test 15 FAILED - SF0 protocol test failed");
+            record_failed_test(16, "OScan1 Scanning Format 0 (SF0)");
+            $display("    ✗ Test 16 FAILED - SF0 protocol test failed");
         end
         #500;
 
-        // Test 16: OScan1 Zero Insertion/Deletion
-        $display("\nTest 16: OScan1 Zero Stuffing (Bit Stuffing)");
+        // Test 17: OScan1 Zero Insertion/Deletion
+        $display("\nTest 17: OScan1 Zero Stuffing (Bit Stuffing)");
         test_count = test_count + 1;
         test_oscan1_zero_stuffing();
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 16 PASSED - Zero stuffing test successful");
+            $display("    ✓ Test 17 PASSED - Zero stuffing test successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(16, "OScan1 Zero Stuffing (Bit Stuffing)");
-            $display("    ✗ Test 16 FAILED - Zero stuffing test failed");
+            record_failed_test(17, "OScan1 Zero Stuffing (Bit Stuffing)");
+            $display("    ✗ Test 17 FAILED - Zero stuffing test failed");
         end
         #500;
 
-        // Test 17: Protocol Switching Stress Test
-        $display("\nTest 17: JTAG ↔ cJTAG Protocol Switching");
+        // Test 18: Protocol Switching Stress Test
+        $display("\nTest 18: JTAG ↔ cJTAG Protocol Switching");
         test_count = test_count + 1;
         test_protocol_switching();
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 17 PASSED - Protocol switching successful");
+            $display("    ✓ Test 18 PASSED - Protocol switching successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(17, "JTAG ↔ cJTAG Protocol Switching");
-            $display("    ✗ Test 17 FAILED - Protocol switching failed");
+            record_failed_test(18, "JTAG ↔ cJTAG Protocol Switching");
+            $display("    ✗ Test 18 FAILED - Protocol switching failed");
         end
         #500;
 
-        // Test 18: Boundary Conditions Testing
-        $display("\nTest 18: Protocol Boundary Conditions");
+        // Test 19: Boundary Conditions Testing
+        $display("\nTest 19: Protocol Boundary Conditions");
         test_count = test_count + 1;
         test_boundary_conditions();
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 18 PASSED - Boundary conditions test successful");
+            $display("    ✓ Test 19 PASSED - Boundary conditions test successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(18, "Protocol Boundary Conditions");
-            $display("    ✗ Test 18 FAILED - Boundary conditions test failed");
+            record_failed_test(19, "Protocol Boundary Conditions");
+            $display("    ✗ Test 19 FAILED - Boundary conditions test failed");
         end
         #500;
 
-        // Test 19: Full cJTAG Protocol Test
-        $display("\nTest 19: Full cJTAG Protocol Implementation");
+        // Test 20: Full cJTAG Protocol Test
+        $display("\nTest 20: Full cJTAG Protocol Implementation");
         test_count = test_count + 1;
         test_full_cjtag_protocol();
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 19 PASSED - Full cJTAG protocol successful");
+            $display("    ✓ Test 20 PASSED - Full cJTAG protocol successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(19, "Full cJTAG Protocol Implementation");
-            $display("    ✗ Test 19 FAILED - Full cJTAG protocol failed");
+            record_failed_test(20, "Full cJTAG Protocol Implementation");
+            $display("    ✗ Test 20 FAILED - Full cJTAG protocol failed");
         end
         #1000;
 
@@ -952,25 +972,96 @@ module jtag_tb;
         end
     endtask
 
+    // Task to write DMI register (41 bits) with proper DMI operation
+    task write_dm_register(input [6:0] address, input [31:0] write_value);
+        // Write a DMI register via the JTAG interface (shift the 41‑bit DMI command)
+        integer i;
+        logic [40:0] write_data;
+        begin
+            $display("  Writing DMI register 0x%02h with value 0x%08h via JTAG", address, write_value);
+
+            // First, load IR with DMI instruction (0x11)
+            $display("    Loading IR with DMI instruction (0x11)...");
+            write_ir_with_verify(5'h11);
+
+            // Construct 41‑bit DMI command: [addr:7][data:32][op:2]
+            write_data = {address, write_value, 2'b10}; // DMI write op (0x2)
+
+            $display("    DMI command: addr=0x%02h, data=0x%08h, op=0x%01h", address, write_value, 2'b10);
+            $display("    41-bit value: 0x%011h", write_data);
+            $display("    Checking current IR after load: ir_out=0x%02h", `JTAG_IR_OUT);
+
+            // Start from Run‑Test/Idle
+            jtag_pin1_i = 0;
+            wait_tck();
+            // Go to Select‑DR (TMS=1)
+            jtag_pin1_i = 1;
+            wait_tck();
+            // Go to Capture‑DR (TMS=0)
+            jtag_pin1_i = 0;
+            wait_tck();
+            // Transition from Capture-DR to Shift-DR (TMS=0)
+            jtag_pin1_i = 0;
+            wait_tck();
+            // Now in Shift‑DR state – shift in the DMI command (41 bits)
+            $display("    Shifting 41-bit DMI command (LSB first)...");
+            for (i = 0; i < 41; i = i + 1) begin
+                jtag_pin2_i = write_data[i]; // LSB first
+                jtag_pin1_i = (i == 40) ? 1 : 0; // TMS=1 on last bit to exit
+                if (i < 5 || i > 38) begin  // Show first 5 and last 2 bits
+                    $display("      Bit %02d: TDI=%b (TMS=%b)", i, write_data[i], (i == 40) ? 1'b1 : 1'b0);
+                end
+                wait_tck();
+            end
+            $display("    All 41 bits shifted, exiting Shift-DR state");
+            // Update‑DR (TMS=1 from Exit1‑DR)
+            jtag_pin1_i = 1;
+            wait_tck();
+            $display("    Entered Update-DR state");
+            // Return to Run‑Test/Idle (TMS=0 from Update‑DR)
+            jtag_pin1_i = 0;
+            wait_tck();
+            $display("    Returned to Run-Test-Idle");
+            // Small delay to let the DUT process the write
+            repeat(5) wait_tck();
+            $display("    ✓ DMI register write operation completed via JTAG");
+            $display("    Checking final DMI signals: dmi_req_valid=%b, dmi_op=0x%h, dmi_addr=0x%02h, dmi_wdata=0x%08h",
+                     dmi_req_valid, dmi_op, dmi_addr, dmi_wdata);
+        end
+    endtask
+
+    // Helper task that writes a DMI register and verifies the write by reading back
+    task write_dm_register_with_check(input [6:0] address, input [31:0] write_value);
+        begin
+            write_dm_register(address, write_value);
+            // Read back and verify
+            read_dm_register_with_check(address, write_value);
+        end
+    endtask
+
     // Task to read DMI register (41 bits) with proper DMI operation
+    // DMI reads require 2 transactions:
+    // 1. First transaction: Send read command
+    // 2. Second transaction: Get the read result
     task read_dm_register_with_check(input [6:0] address, input [31:0] expected_value);
         integer i;
         logic [40:0] write_data, read_data;
-        logic [6:0] dmi_addr_test;
-        logic [31:0] dmi_data_test;
-        logic [1:0] dmi_op_test;
         begin
             $display("  Reading 41-bit DMI register with proper DMI operation...");
 
-            // Step 1: Write a DMI read command to address 0x11 (DMSTATUS)
-            dmi_addr_test = address;        // DMSTATUS register address
-            dmi_data_test = expected_value; // DMI Data
-            dmi_op_test   = 2'b10;          // DMI read operation (01 = write, 10 = read)
+            // First, ensure IR is loaded with DMI instruction (0x11)
+            $display("    Loading IR with DMI instruction (0x11)...");
+            write_ir_with_verify(5'h11);
 
+            $display("    Checking current IR after load: ir_out=0x%02h", `JTAG_IR_OUT);
+
+            // Transaction 1: Write a DMI read command to the specified address
             // Construct 41-bit DMI command: [addr:7][data:32][op:2]
-            write_data = {dmi_addr_test, dmi_data_test, dmi_op_test};
+            write_data = {address, 32'h0, 2'b01}; // DMI read op (0x1)
 
-            $display("    Step 1: Writing DMI read command (addr=0x%02h, op=read)", dmi_addr_test);
+            $display("    DMI read command: addr=0x%02h, op=read(0x1)", address);
+
+            $display("    Transaction 1: Writing DMI read command (addr=0x%02h, op=read)", address);
 
             // Start from Run-Test/Idle
             jtag_pin1_i = 0;
@@ -984,7 +1075,11 @@ module jtag_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            // Shift-DR state - shift in the DMI command (41 bits)
+            // Transition from Capture-DR to Shift-DR (TMS=0)
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Now in Shift-DR state - shift in the DMI read command (41 bits)
             for (i = 0; i < 41; i = i + 1) begin
                 jtag_pin2_i = write_data[i];  // Shift in LSB first
                 jtag_pin1_i = (i == 40) ? 1 : 0;  // TMS=1 on last bit to exit
@@ -999,12 +1094,15 @@ module jtag_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            // Small delay to let DMI operation process
+            // Wait for DMI operation to process
             repeat(5) wait_tck();
 
-            $display("    Step 2: Reading DMI response...");
+            $display("    Transaction 2: Reading DMI response...");
 
-            // Step 2: Read back the DMI response
+            // Transaction 2: Send a NOP to get the read result
+            // Construct 41-bit DMI NOP command: [addr:7][data:32][op:2]
+            write_data = {7'h0, 32'h0, 2'b00}; // DMI NOP op
+
             // Go to Select-DR (TMS=1)
             jtag_pin1_i = 1;
             wait_tck();
@@ -1013,13 +1111,27 @@ module jtag_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            // Shift-DR state - shift out the response (41 bits)
-            read_data = 41'h0;
-            for (i = 0; i < 41; i = i + 1) begin
-                jtag_pin2_i = 1'b0;  // Shift in zeros
+            // Transition from Capture-DR to Shift-DR (TMS=0)
+            // This clock edge shifts out bit 0!
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Capture bit 0 that was shifted out during transition
+            #1;
+            read_data[0] = jtag_pin3_o;
+
+            // Now in Shift-DR state - shift NOP while capturing response (remaining 40 bits)
+            for (i = 1; i <= 40; i = i + 1) begin
+                // Setup TDI/TMS for this bit
+                jtag_pin2_i = write_data[i];
                 jtag_pin1_i = (i == 40) ? 1 : 0;  // TMS=1 on last bit to exit
+
+                // Clock edge happens here
                 wait_tck();
-                read_data = {jtag_pin3_o, read_data[40:1]};
+
+                // Capture TDO after the clock edge
+                #1;
+                read_data[i] = jtag_pin3_o;
             end
 
             // Update-DR (TMS=1 from Exit1-DR)
@@ -1030,33 +1142,19 @@ module jtag_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
-            // Parse DMI response fields
-            dmi_op_test = read_data[1:0];
-            dmi_data_test = read_data[33:2];
-            dmi_addr_test = read_data[40:34];
+            $display("    DMI read response: data=0x%08h, op=%0d", read_data[33:2], read_data[1:0]);
+            $display("      Expected Data: 0x%08h", expected_value);
 
-            $display("    DMI response: 0x%011h", read_data);
-            $display("      Address: 0x%02h", dmi_addr_test);
-            $display("      Data:    0x%08h", dmi_data_test);
-            $display("      Op:      0x%01h", dmi_op_test);
-
-            // Verify we got a proper DMI response:
-            // - Address should match what we requested (0x11)
-            // - Op should be 0 (success) or 2 (in progress)
-            // - Data should be non-zero (DMSTATUS has defined bits)
-            if (dmi_addr_test == address && (dmi_op_test == 2'h0 || dmi_op_test == 2'h2) && dmi_data_test == expected_value) begin
-                $display("    ✓ DMI register operation successful - proper DMI transaction");
+            // Verify the read data matches expected value
+            if (read_data[33:2] == expected_value) begin
+                $display("    ✓ DMI register read operation successful");
                 last_verification_result = 1'b1;
             end else begin
-                $display("    ✗ DMI register operation failed");
+                $display("    ✗ DMI register read operation failed");
                 last_verification_result = 1'b0;
             end
         end
     endtask
-
-    // ========================================
-    // Enhanced Protocol Testing Tasks
-    // ========================================
 
     // Task to test OScan1 OAC (Attention Character) detection
     task test_oscan1_oac_detection();

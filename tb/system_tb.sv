@@ -155,21 +155,39 @@ module system_tb;
             $display("    ✗ Test 2 FAILED - IDCODE verification failed");
         end
 
-        // Test 3: Read DMSTATUS
-        $display("\nTest 3: Read Debug Module Status");
+        // Test 3: Activate Debug Module
+        $display("\nTest 3: Activate Debug Module");
+        test_count = test_count + 1;
+        // Debug modules must be activated before they can be accessed
+        // Write dmactive=1 to DMCONTROL register
+        write_dm_register(7'h10, 32'h00000001);  // DMCONTROL: dmactive=1 only
+        #500;
+        // Verify activation by reading back DMCONTROL
+        read_dm_register_with_check(7'h10, 32'h00000001);
+        if (last_verification_result) begin
+            pass_count = pass_count + 1;
+            $display("    ✓ Test 3 PASSED - Debug Module activated successfully");
+        end else begin
+            fail_count = fail_count + 1;
+            record_failed_test(3, "Activate Debug Module");
+            $display("    ✗ Test 3 FAILED - Debug Module activation failed");
+        end
+
+        // Test 4: Read DMSTATUS
+        $display("\nTest 4: Read Debug Module Status");
         test_count = test_count + 1;
         read_dm_register_with_check(7'h11, 32'h00000C82);  // DMSTATUS expected value
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 3 PASSED - DMSTATUS register verification successful");
+            $display("    ✓ Test 4 PASSED - DMSTATUS register verification successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(3, "Read Debug Module Status");
-            $display("    ✗ Test 3 FAILED - DMSTATUS register verification failed");
+            record_failed_test(4, "Read Debug Module Status");
+            $display("    ✗ Test 4 FAILED - DMSTATUS register verification failed");
         end
 
-        // Test 4: Halt Hart
-        $display("\nTest 4: Halt Hart via Debug Module");
+        // Test 5: Halt Hart
+        $display("\nTest 5: Halt Hart via Debug Module");
         test_count = test_count + 1;
         write_dm_register(7'h10, 32'h80000001);  // DMCONTROL: haltreq=1, dmactive=1
         #500;
@@ -188,16 +206,16 @@ module system_tb;
 
             if (hart_halted && debug_req && dmcontrol_ok && dmstatus_ok) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 4 PASSED - Hart successfully halted with register verification");
+                $display("    ✓ Test 5 PASSED - Hart successfully halted with register verification");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(4, "Halt Hart via Debug Module");
-                $display("    ✗ Test 4 FAILED - Hart halt failed (halted=%0b, debug_req=%0b, dmcontrol_ok=%0b, dmstatus_ok=%0b)",
+                record_failed_test(5, "Halt Hart via Debug Module");
+                $display("    ✗ Test 5 FAILED - Hart halt failed (halted=%0b, debug_req=%0b, dmcontrol_ok=%0b, dmstatus_ok=%0b)",
                          hart_halted, debug_req, dmcontrol_ok, dmstatus_ok);
             end
         end
 
-        // Test 5: Read DMSTATUS after halt
+        // Test 6: Read DMSTATUS after halt
         $display("\nTest 5: Read DMSTATUS after halt");
         test_count = test_count + 1;
         read_dm_register_with_check(7'h11, 32'h00000C83);  // Expected DMSTATUS with halt bit set
@@ -210,8 +228,8 @@ module system_tb;
             $display("    ✗ Test 5 FAILED - DMSTATUS verification after halt failed");
         end
 
-        // Test 6: Resume Hart
-        $display("\nTest 6: Resume Hart");
+        // Test 7: Resume Hart
+        $display("\nTest 7: Resume Hart");
         test_count = test_count + 1;
         write_dm_register(7'h10, 32'h40000001);  // DMCONTROL: resumereq=1, dmactive=1
         #500;
@@ -229,17 +247,17 @@ module system_tb;
 
             if (!hart_halted && dmcontrol_ok && dmstatus_ok) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 6 PASSED - Hart resume successful with register verification");
+                $display("    ✓ Test 7 PASSED - Hart resume successful with register verification");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(6, "Resume Hart");
-                $display("    ✗ Test 6 FAILED - Hart resume failed (halted=%0b, dmcontrol_ok=%0b, dmstatus_ok=%0b)",
+                record_failed_test(7, "Resume Hart");
+                $display("    ✗ Test 7 FAILED - Hart resume failed (halted=%0b, dmcontrol_ok=%0b, dmstatus_ok=%0b)",
                          hart_halted, dmcontrol_ok, dmstatus_ok);
             end
         end
 
-        // Test 7: Switch to cJTAG mode
-        $display("\nTest 7: Switch to cJTAG mode");
+        // Test 8: Switch to cJTAG mode
+        $display("\nTest 8: Switch to cJTAG mode");
         test_count = test_count + 1;
         mode_select = 1;  // Enable cJTAG mode
         #200;
@@ -252,33 +270,33 @@ module system_tb;
             read_idcode_with_check(32'h1DEAD3FF);
             if (last_verification_result) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 7 PASSED - cJTAG mode switched and IDCODE verification successful");
+                $display("    ✓ Test 8 PASSED - cJTAG mode switched and IDCODE verification successful");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(7, "Switch to cJTAG mode - IDCODE verification");
-                $display("    ✗ Test 7 FAILED - cJTAG mode switched but IDCODE verification failed");
+                record_failed_test(8, "Switch to cJTAG mode - IDCODE verification");
+                $display("    ✗ Test 8 FAILED - cJTAG mode switched but IDCODE verification failed");
             end
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(7, "Switch to cJTAG mode");
-            $display("    ✗ Test 7 FAILED - Failed to switch to cJTAG mode (active_mode=%0b)", active_mode);
+            record_failed_test(8, "Switch to cJTAG mode");
+            $display("    ✗ Test 8 FAILED - Failed to switch to cJTAG mode (active_mode=%0b)", active_mode);
         end
 
-        // Test 8: cJTAG DMI access
-        $display("\nTest 8: cJTAG DMI register access");
+        // Test 9: cJTAG DMI access
+        $display("\nTest 9: cJTAG DMI register access");
         test_count = test_count + 1;
         read_dm_register_with_check(7'h11, 32'h00000C82);  // Read DMSTATUS in cJTAG mode
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 8 PASSED - cJTAG DMI register verification successful");
+            $display("    ✓ Test 9 PASSED - cJTAG DMI register verification successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(8, "cJTAG DMI register access");
-            $display("    ✗ Test 8 FAILED - cJTAG DMI register verification failed");
+            record_failed_test(9, "cJTAG DMI register access");
+            $display("    ✗ Test 9 FAILED - cJTAG DMI register verification failed");
         end
 
-        // Test 9: cJTAG hart control
-        $display("\nTest 9: cJTAG hart control");
+        // Test 10: cJTAG hart control
+        $display("\nTest 10: cJTAG hart control");
         test_count = test_count + 1;
         write_dm_register(7'h10, 32'h80000001);  // DMCONTROL: haltreq=1, dmactive=1
         #500;
@@ -296,17 +314,17 @@ module system_tb;
 
             if (hart_halted && dmcontrol_ok && dmstatus_ok) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 9 PASSED - Hart control works in cJTAG mode with register verification");
+                $display("    ✓ Test 10 PASSED - Hart control works in cJTAG mode with register verification");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(9, "cJTAG hart control");
-                $display("    ✗ Test 9 FAILED - Hart control failed in cJTAG mode (halted=%0b, dmcontrol_ok=%0b, dmstatus_ok=%0b)",
+                record_failed_test(10, "cJTAG hart control");
+                $display("    ✗ Test 10 FAILED - Hart control failed in cJTAG mode (halted=%0b, dmcontrol_ok=%0b, dmstatus_ok=%0b)",
                          hart_halted, dmcontrol_ok, dmstatus_ok);
             end
         end
 
-        // Test 10: Return to JTAG mode
-        $display("\nTest 10: Return to JTAG mode");
+        // Test 11: Return to JTAG mode
+        $display("\nTest 11: Return to JTAG mode");
         test_count = test_count + 1;
         mode_select = 0;
         #200;
@@ -319,118 +337,118 @@ module system_tb;
             read_idcode_with_check(32'h1DEAD3FF);
             if (last_verification_result) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 10 PASSED - JTAG mode switched and IDCODE verification successful");
+                $display("    ✓ Test 11 PASSED - JTAG mode switched and IDCODE verification successful");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(10, "Return to JTAG mode - IDCODE verification");
-                $display("    ✗ Test 10 FAILED - JTAG mode switched but IDCODE verification failed");
+                record_failed_test(11, "Return to JTAG mode - IDCODE verification");
+                $display("    ✗ Test 11 FAILED - JTAG mode switched but IDCODE verification failed");
             end
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(10, "Return to JTAG mode");
-            $display("    ✗ Test 10 FAILED - Failed to return to JTAG mode (active_mode=%0b)", active_mode);
+            record_failed_test(11, "Return to JTAG mode");
+            $display("    ✗ Test 11 FAILED - Failed to return to JTAG mode (active_mode=%0b)", active_mode);
         end
 
-        // Test 11: Verify JTAG mode functionality
-        $display("\nTest 11: Verify JTAG mode after switch");
+        // Test 12: Verify JTAG mode functionality
+        $display("\nTest 12: Verify JTAG mode after switch");
         test_count = test_count + 1;
         read_dm_register_with_check(7'h11, 32'h00000C82);  // Read DMSTATUS
         if (last_verification_result) begin
             pass_count = pass_count + 1;
-            $display("    ✓ Test 11 PASSED - JTAG mode verification successful");
+            $display("    ✓ Test 12 PASSED - JTAG mode verification successful");
         end else begin
             fail_count = fail_count + 1;
-            record_failed_test(11, "Verify JTAG mode after switch");
-            $display("    ✗ Test 11 FAILED - JTAG mode verification failed");
+            record_failed_test(12, "Verify JTAG mode after switch");
+            $display("    ✗ Test 12 FAILED - JTAG mode verification failed");
         end
 
-        // Test 12: Protocol switching stress test
-        $display("\nTest 12: Protocol switching stress test");
+        // Test 13: Protocol switching stress test
+        $display("\nTest 13: Protocol switching stress test");
         test_count = test_count + 1;
         begin
             test_protocol_switching_stress();
             if (last_verification_result) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 12 PASSED - Protocol switching stress test successful");
+                $display("    ✓ Test 13 PASSED - Protocol switching stress test successful");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(12, "Protocol switching stress test");
-                $display("    ✗ Test 12 FAILED - Protocol switching stress test failed");
+                record_failed_test(13, "Protocol switching stress test");
+                $display("    ✗ Test 13 FAILED - Protocol switching stress test failed");
             end
         end
 
-        // Test 13: DMI Write/Read Verification
-        $display("\nTest 13: DMI Write/Read Verification");
+        // Test 14: DMI Write/Read Verification
+        $display("\nTest 14: DMI Write/Read Verification");
         test_count = test_count + 1;
         begin
             test_dmi_write_read_verification();
             if (last_verification_result) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 13 PASSED - DMI write/read verification successful");
+                $display("    ✓ Test 14 PASSED - DMI write/read verification successful");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(13, "DMI Write/Read Verification");
-                $display("    ✗ Test 13 FAILED - DMI write/read verification failed");
+                record_failed_test(14, "DMI Write/Read Verification");
+                $display("    ✗ Test 14 FAILED - DMI write/read verification failed");
             end
         end
 
-        // Test 14: Abstract Data Register Test
-        $display("\nTest 14: Abstract Data Register Test");
+        // Test 15: Abstract Data Register Test
+        $display("\nTest 15: Abstract Data Register Test");
         test_count = test_count + 1;
         begin
             test_abstract_data_registers();
             if (last_verification_result) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 14 PASSED - Abstract data register verification successful");
+                $display("    ✓ Test 15 PASSED - Abstract data register verification successful");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(14, "Abstract Data Register Test");
-                $display("    ✗ Test 14 FAILED - Abstract data register verification failed");
+                record_failed_test(15, "Abstract Data Register Test");
+                $display("    ✗ Test 15 FAILED - Abstract data register verification failed");
             end
         end
 
-        // Test 15: Program Buffer Test
-        $display("\nTest 15: Program Buffer Test");
+        // Test 16: Program Buffer Test
+        $display("\nTest 16: Program Buffer Test");
         test_count = test_count + 1;
         begin
             test_program_buffer_access();
             if (last_verification_result) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 15 PASSED - Program buffer verification successful");
+                $display("    ✓ Test 16 PASSED - Program buffer verification successful");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(15, "Program Buffer Test");
-                $display("    ✗ Test 15 FAILED - Program buffer verification failed");
+                record_failed_test(16, "Program Buffer Test");
+                $display("    ✗ Test 16 FAILED - Program buffer verification failed");
             end
         end
 
-        // Test 16: Hart Info Register Test
-        $display("\nTest 16: Hart Info Register Test");
+        // Test 17: Hart Info Register Test
+        $display("\nTest 17: Hart Info Register Test");
         test_count = test_count + 1;
         begin
             test_hartinfo_register();
             if (last_verification_result) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 16 PASSED - HARTINFO register verification successful");
+                $display("    ✓ Test 17 PASSED - HARTINFO register verification successful");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(16, "Hart Info Register Test");
-                $display("    ✗ Test 16 FAILED - HARTINFO register verification failed");
+                record_failed_test(17, "Hart Info Register Test");
+                $display("    ✗ Test 17 FAILED - HARTINFO register verification failed");
             end
         end
 
-        // Test 17: Comprehensive Register Pattern Test
-        $display("\nTest 17: Comprehensive Register Pattern Test");
+        // Test 18: Comprehensive Register Pattern Test
+        $display("\nTest 18: Comprehensive Register Pattern Test");
         test_count = test_count + 1;
         begin
             test_register_patterns();
             if (last_verification_result) begin
                 pass_count = pass_count + 1;
-                $display("    ✓ Test 17 PASSED - Comprehensive register pattern verification successful");
+                $display("    ✓ Test 18 PASSED - Comprehensive register pattern verification successful");
             end else begin
                 fail_count = fail_count + 1;
-                record_failed_test(17, "Comprehensive Register Pattern Test");
-                $display("    ✗ Test 17 FAILED - Comprehensive register pattern verification failed");
+                record_failed_test(18, "Comprehensive Register Pattern Test");
+                $display("    ✗ Test 18 FAILED - Comprehensive register pattern verification failed");
             end
         end
 
@@ -540,7 +558,7 @@ module system_tb;
             wait_tck();
 
             // Shift in DMI write request (41 bits: 7-bit addr + 32-bit data + 2-bit op)
-            dmi_data = {addr, data, 2'b01};  // Write operation (01 = write, 10 = read)
+            dmi_data = {addr, data, 2'b10};  // Write operation (10 = write, 01 = read)
             for (i = 0; i < 41; i = i + 1) begin
                 jtag_pin2_i = dmi_data[i];
                 jtag_pin1_i = (i == 40) ? 1 : 0;  // TMS=1 on last bit to exit
@@ -723,11 +741,12 @@ module system_tb;
         logic [40:0] dmi_cmd;
         logic [40:0] read_data;
         logic [31:0] reg_data;
+        logic [40:0] nop_cmd;
         begin
             $display("  Reading and verifying DMI register 0x%02h...", address);
 
             // Build DMI command (read operation)
-            dmi_cmd = {address, 32'h0, 2'b10};  // Read operation (10 = read, 01 = write)
+            dmi_cmd = {address, 32'h0, 2'b01};  // Read operation (01 = read, 10 = write)
 
             // Load DMI instruction (0x11)
             write_ir_with_verify(5'h11);
@@ -761,6 +780,38 @@ module system_tb;
             jtag_pin1_i = 0;
             wait_tck();
 
+            // Wait a few cycles for DMI operation to complete
+            repeat(5) wait_tck();
+
+            // Do a second DMI read to get the response
+            // Go to Select-DR (TMS=1)
+            jtag_pin1_i = 1;
+            wait_tck();
+
+            // Go to Capture-DR (TMS=0)
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Shift NOP operation to read response
+            nop_cmd = {address, 32'h0, 2'b00};  // NOP operation
+            read_data = 41'h0;
+            for (i = 0; i < 41; i = i + 1) begin
+                jtag_pin2_i = nop_cmd[i];
+                jtag_pin1_i = (i == 40) ? 1 : 0;  // TMS=1 on last bit to exit
+                wait_tck();
+                read_data = {jtag_pin3_o, read_data[40:1]};
+            end
+
+            // Update-DR (TMS=1 from Exit1-DR)
+            jtag_pin1_i = 1;
+            wait_tck();
+
+            // Return to Run-Test/Idle (TMS=0 from Update-DR)
+            jtag_pin1_i = 0;
+            wait_tck();
+
+            // Extract register data from DMI response (bits 33:2 contain the data)
+            reg_data = read_data[33:2];
             $display("    Register Read: 0x%08h", reg_data);
             $display("    Expected:      0x%08h", expected_value);
 
