@@ -61,14 +61,8 @@ module system_tb;
     // Global variable to track verification results from tasks
     logic last_verification_result = 1'b0;
 
-    // Task to record failed test
-    task record_failed_test(input integer test_num, input string test_name);
-        if (failed_test_count < MAX_TESTS) begin
-            failed_tests[failed_test_count] = test_name;
-            failed_test_numbers[failed_test_count] = test_num;
-            failed_test_count = failed_test_count + 1;
-        end
-    endtask
+    // Include common JTAG tasks
+    `include "jtag_common.sv"
 
     // Instantiate DUT
     system_top dut (
@@ -523,317 +517,6 @@ module system_tb;
         return status;
     endfunction
 
-    // Task to reset TAP controller
-    task reset_tap();
-        integer i;
-        begin
-            $display("  Resetting TAP controller (5 TMS=1 clocks)");
-            jtag_pin1_i = 1;
-            for (i = 0; i < 5; i = i + 1) begin
-                wait_tck();
-            end
-            jtag_pin1_i = 0;
-            wait_tck();
-            $display("  TAP reset complete");
-        end
-    endtask
-
-    // Task to write Debug Module register via DMI with optional readback verification
-    task write_dm_register(input logic [6:0] addr, input logic [31:0] data);
-        integer i;
-        logic [40:0] dmi_data;
-        begin
-            $display("  Writing DM register 0x%02h = 0x%08h via DMI...", addr, data);
-
-            // Start from Run-Test/Idle
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Go to Select-DR (TMS=1)
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Go to Capture-DR (TMS=0)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Shift in DMI write request (41 bits: 7-bit addr + 32-bit data + 2-bit op)
-            dmi_data = {addr, data, 2'b10};  // Write operation (10 = write, 01 = read)
-            for (i = 0; i < 41; i = i + 1) begin
-                jtag_pin2_i = dmi_data[i];
-                jtag_pin1_i = (i == 40) ? 1 : 0;  // TMS=1 on last bit to exit
-                wait_tck();
-            end
-
-            // Update-DR (TMS=1 from Exit1-DR)
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Return to Run-Test/Idle (TMS=0 from Update-DR)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Small delay to let DMI operation process
-            repeat(5) wait_tck();
-
-            $display("  Write operation submitted to DMI");
-        end
-    endtask
-
-    // Enhanced task to write and verify Debug Module register
-    task write_dm_register_with_verify(input logic [6:0] addr, input logic [31:0] data);
-        begin
-            write_dm_register(addr, data);
-            #100;  // Allow time for write to complete
-            read_dm_register_with_check(addr, data);
-
-            if (last_verification_result) begin
-                $display("  ✓ Write operation verified successfully for addr=0x%02h, data=0x%08h", addr, data);
-            end else begin
-                $display("  ✗ Write operation verification FAILED for addr=0x%02h, data=0x%08h", addr, data);
-            end
-        end
-    endtask
-
-    // Task to write instruction register with verification
-    task write_ir_with_verify(input [4:0] instruction);
-        integer i;
-        logic [4:0] captured_ir;
-        logic [4:0] ir_value;
-        logic [4:0] expected_value;
-        logic capture_passed;
-        logic load_passed;
-        begin
-            ir_value = instruction[4:0];
-            expected_value = 5'h01;  // IR capture always returns 0x01 per IEEE 1149.1
-            $display("  Writing and verifying IR: 0x%02h (capture will be: 0x%02h)", instruction, expected_value);
-
-            // Go to Run-Test/Idle
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Select IR path (TMS=1, TMS=1)
-            jtag_pin1_i = 1;
-            wait_tck();
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Go to Capture-IR (TMS=0)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Transition from Capture-IR to Shift-IR (TMS=0)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Now in Shift-IR state - shift all 5 bits with proper timing
-            captured_ir = 5'h0;
-            for (i = 0; i < 5; i = i + 1) begin
-                jtag_pin2_i = ir_value[i];  // Set TDI for this bit
-                jtag_pin1_i = (i == 4) ? 1 : 0;  // TMS=1 on last bit to exit
-                captured_ir = {jtag_pin3_o, captured_ir[4:1]};
-                wait_tck();
-            end
-            $display("    Captured IR: 0x%02h", captured_ir);
-
-            // Now in Exit1-IR state, go to Update-IR (TMS=1)
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Return to Run-Test/Idle (TMS=0 from Update-IR)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Stay in Run-Test/Idle for a few cycles to let instruction take effect
-            repeat(5) wait_tck();
-
-            $display("    Wrote IR: 0x%02h, Captured IR: 0x%02h", ir_value, captured_ir);
-
-            // Dual verification: IEEE 1149.1 compliance + actual instruction load
-            capture_passed = (captured_ir == expected_value);
-            load_passed = (`JTAG_IR_LATCH == ir_value);
-
-            if (capture_passed) begin
-                $display("    ✓ IR capture verification PASSED - IEEE 1149.1 pattern (0x%02h)", expected_value);
-            end else begin
-                $display("    ✗ IR capture verification FAILED - captured: 0x%02h, expected: 0x%02h", captured_ir, expected_value);
-            end
-
-            if (load_passed) begin
-                $display("    ✓ IR load verification PASSED - instruction loaded (0x%02h)", ir_value);
-            end else begin
-                $display("    ✗ IR load verification FAILED - ir_latch: 0x%02h, expected: 0x%02h",
-                         `JTAG_IR_LATCH, ir_value);
-            end
-
-            // Both verifications must pass
-            last_verification_result = capture_passed && load_passed;
-
-            // Debug info
-            $display("    Debug: ir_out=0x%02h, tap_state=0x%h", `JTAG_IR_OUT, `JTAG_TAP_STATE);
-        end
-    endtask
-
-    // Task to shift in IR instruction
-    task shift_ir_instruction(input logic [7:0] instr);
-        integer i;
-        begin
-            for (i = 0; i < 8; i = i + 1) begin
-                jtag_pin2_i = instr[i];
-                wait_tck();
-            end
-        end
-    endtask
-
-    // Task for IDCODE reading with value checking
-    task read_idcode_with_check(input [31:0] expected_value);
-        integer i;
-        logic [31:0] read_data;
-        begin
-            $display("  Reading and verifying IDCODE register...");
-
-            // Go to Run-Test/Idle
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Select DR path (TMS=1)
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Go to Capture-DR (TMS=0)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Shift IDCODE (shift 32 bits)
-            read_data = 32'h0;
-            for (i = 0; i < 32; i = i + 1) begin
-                jtag_pin2_i = 1'b0;
-                jtag_pin1_i = (i == 31) ? 1 : 0;  // TMS=1 on last bit to exit
-                wait_tck();
-                read_data = {jtag_pin3_o, read_data[31:1]};
-            end
-
-            $display("    IDCODE Read: 0x%08h", read_data);
-            $display("    Expected:    0x%08h", expected_value);
-
-            // Check if IDCODE matches expected value and set global result
-            if (read_data == expected_value) begin
-                $display("    ✓ IDCODE verification PASSED");
-                last_verification_result = 1'b1;
-            end else begin
-                $display("    ✗ IDCODE verification FAILED");
-                last_verification_result = 1'b0;
-            end
-
-            // Exit shift state
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Update-DR
-            jtag_pin1_i = 0;
-            wait_tck();
-        end
-    endtask
-
-    // Task for Debug Module register reading with value checking
-    task read_dm_register_with_check(input [6:0] address, input [31:0] expected_value);
-        integer i;
-        logic [40:0] dmi_cmd;
-        logic [40:0] read_data;
-        logic [31:0] reg_data;
-        logic [40:0] nop_cmd;
-        begin
-            $display("  Reading and verifying DMI register 0x%02h...", address);
-
-            // Build DMI command (read operation)
-            dmi_cmd = {address, 32'h0, 2'b01};  // Read operation (01 = read, 10 = write)
-
-            // Load DMI instruction (0x11)
-            write_ir_with_verify(5'h11);
-
-            // Go to DR scan
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Go to Select-DR (TMS=1)
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Go to Capture-DR (TMS=1)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Shift 41-bit DMI command
-            read_data = 41'h0;
-            for (i = 0; i < 41; i = i + 1) begin
-                jtag_pin2_i = dmi_cmd[i];
-                jtag_pin1_i = (i == 40) ? 1 : 0;  // TMS=1 on last bit to exit
-                wait_tck();
-                read_data = {jtag_pin3_o, read_data[40:1]};
-            end
-
-            // Update-DR (TMS=1 from Exit1-DR)
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Return to Run-Test/Idle (TMS=0 from Update-DR)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Wait a few cycles for DMI operation to complete
-            repeat(5) wait_tck();
-
-            // Do a second DMI read to get the response
-            // Go to Select-DR (TMS=1)
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Go to Capture-DR (TMS=0)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Shift NOP operation to read response
-            nop_cmd = {address, 32'h0, 2'b00};  // NOP operation
-            read_data = 41'h0;
-            for (i = 0; i < 41; i = i + 1) begin
-                jtag_pin2_i = nop_cmd[i];
-                jtag_pin1_i = (i == 40) ? 1 : 0;  // TMS=1 on last bit to exit
-                wait_tck();
-                read_data = {jtag_pin3_o, read_data[40:1]};
-            end
-
-            // Update-DR (TMS=1 from Exit1-DR)
-            jtag_pin1_i = 1;
-            wait_tck();
-
-            // Return to Run-Test/Idle (TMS=0 from Update-DR)
-            jtag_pin1_i = 0;
-            wait_tck();
-
-            // Extract register data from DMI response (bits 33:2 contain the data)
-            reg_data = read_data[33:2];
-            $display("    Register Read: 0x%08h", reg_data);
-            $display("    Expected:      0x%08h", expected_value);
-
-            // Check if register value matches expected and set global result
-            if (reg_data == expected_value) begin
-                $display("    ✓ DMI register verification PASSED");
-                last_verification_result = 1'b1;
-            end else begin
-                $display("    ✗ DMI register verification FAILED");
-                last_verification_result = 1'b0;
-            end
-        end
-    endtask
-
-    // Task to wait for TCK edge
-    task wait_tck();
-        begin
-            wait (jtag_pin0_i == 1);
-            wait (jtag_pin0_i == 0);
-        end
-    endtask
-
     // Task for protocol switching stress test
     task test_protocol_switching_stress();
         integer i;
@@ -907,7 +590,7 @@ module system_tb;
                 $display("    Testing pattern %0d: 0x%08h", i, test_values[i]);
 
                 // Write test pattern to DATA0 (0x04) and verify
-                write_dm_register_with_verify(7'h04, test_values[i]);
+                write_dm_register_with_check(7'h04, test_values[i]);
                 if (last_verification_result) begin
                     successful_verifications = successful_verifications + 1;
                     $display("      ✓ Write/Read verification PASSED for pattern 0x%08h", test_values[i]);
@@ -943,7 +626,7 @@ module system_tb;
                 expected_pattern = 32'h1000_0000 + i;  // Unique pattern per register
 
                 // Write to DATAi register (address 0x04 + i) and verify
-                write_dm_register_with_verify(7'(7'h04 + i), expected_pattern);
+                write_dm_register_with_check(7'(7'h04 + i), expected_pattern);
 
                 if (last_verification_result) begin
                     successful_operations = successful_operations + 1;
@@ -978,7 +661,7 @@ module system_tb;
                 expected_pattern = nop_instruction + i;  // Slightly different patterns
 
                 // Write to PROGBUF register (address 0x20 + i) and verify
-                write_dm_register_with_verify(7'(7'h20 + i), expected_pattern);
+                write_dm_register_with_check(7'(7'h20 + i), expected_pattern);
 
                 if (last_verification_result) begin
                     successful_operations = successful_operations + 1;
@@ -1032,7 +715,7 @@ module system_tb;
             // Test DATA0 with walking 1s pattern
             for (i = 0; i < 8; i = i + 1) begin
                 walking_ones = 32'h1 << i;
-                write_dm_register_with_verify(7'h04, walking_ones);  // DATA0
+                write_dm_register_with_check(7'h04, walking_ones);  // DATA0
                 if (last_verification_result) successful_operations = successful_operations + 1;
                 total_operations = total_operations + 1;
             end
@@ -1041,18 +724,18 @@ module system_tb;
             // Test DATA1 with walking 0s pattern
             for (i = 0; i < 8; i = i + 1) begin
                 walking_zeros = ~(32'h1 << i);
-                write_dm_register_with_verify(7'h05, walking_zeros);  // DATA1
+                write_dm_register_with_check(7'h05, walking_zeros);  // DATA1
                 if (last_verification_result) successful_operations = successful_operations + 1;
                 total_operations = total_operations + 1;
             end
             $display("    Walking 0s pattern test completed (%0d/16 passed)", successful_operations);
 
             // Test DATA2 with alternating pattern
-            write_dm_register_with_verify(7'h06, 32'hAAAA_AAAA);
+            write_dm_register_with_check(7'h06, 32'hAAAA_AAAA);
             if (last_verification_result) successful_operations = successful_operations + 1;
             total_operations = total_operations + 1;
 
-            write_dm_register_with_verify(7'h06, 32'h5555_5555);
+            write_dm_register_with_check(7'h06, 32'h5555_5555);
             if (last_verification_result) successful_operations = successful_operations + 1;
             total_operations = total_operations + 1;
 
