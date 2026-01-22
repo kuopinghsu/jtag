@@ -40,9 +40,11 @@ module jtag_tb;
     localparam JTAG_IDCODE = 32'h1DEAD3FF;
 
     // JTAG module path definitions for easier signal access
-    `define JTAG_IR_LATCH    dut.ir_reg.ir_latch
-    `define JTAG_IR_OUT      dut.ir_reg.ir_out
-    `define JTAG_TAP_STATE   dut.tap_ctrl.state
+    `define JTAG_IR_LATCH   dut.ir_reg.ir_latch
+    `define JTAG_IR_OUT     dut.ir_reg.ir_out
+    `define JTAG_TAP_STATE  dut.tap_ctrl.state
+
+    `define TIMEOUT         1000000
 
     // Test tracking variables
     integer test_count = 0;
@@ -487,7 +489,7 @@ module jtag_tb;
 
     // Timeout
     initial begin
-        #1000000;
+        #`TIMEOUT;
         $display("ERROR: Testbench timeout!");
         $finish(1);  // Exit with error code
     end
@@ -497,7 +499,7 @@ module jtag_tb;
     function int get_verification_status_dpi();
         int status;
         // Check for timeout condition first
-        if ($time >= 1000000) begin
+        if ($time >= `TIMEOUT) begin
             status = 2;  // Timeout
         end else if (fail_count > 0) begin
             status = 1;  // Failed

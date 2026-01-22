@@ -323,9 +323,9 @@ task write_dm_register(input [6:0] address, input [31:0] write_value);
         write_ir_with_check(5'h11);
 
         // Construct 41‑bit DMI command: [addr:7][data:32][op:2]
-        write_data = {address, write_value, 2'b10}; // DMI write op (0x2)
+        write_data = {address, write_value, DMI_OP_WRITE};
 
-        $display("    DMI command: addr=0x%02h, data=0x%08h, op=0x%01h", address, write_value, 2'b10);
+        $display("    DMI command: addr=0x%02h, data=0x%08h, op=0x%01h", address, write_value, DMI_OP_WRITE);
         $display("    41-bit value: 0x%011h", write_data);
         $display("    Checking current IR after load: ir_out=0x%02h", `JTAG_IR_OUT);
 
@@ -402,9 +402,9 @@ task read_dm_register_with_check(input [6:0] address, input [31:0] expected_valu
 
         // Transaction 1: Write a DMI read command to the specified address
         // Construct 41-bit DMI command: [addr:7][data:32][op:2]
-        write_data = {address, 32'h0, 2'b01}; // DMI read op (0x1)
+        write_data = {address, 32'h0, DMI_OP_READ};
 
-        $display("    DMI read command: addr=0x%02h, op=read(0x1)", address);
+        $display("    DMI read command: addr=0x%02h, op=read(0x%01h)", address, DMI_OP_READ);
 
         $display("    Transaction 1: Writing DMI read command (addr=0x%02h, op=read)", address);
 
@@ -446,7 +446,7 @@ task read_dm_register_with_check(input [6:0] address, input [31:0] expected_valu
 
         // Transaction 2: Send a NOP to get the read result
         // Construct 41-bit DMI NOP command: [addr:7][data:32][op:2]
-        write_data = {7'h0, 32'h0, 2'b00}; // DMI NOP op
+        write_data = {7'h0, 32'h0, DMI_OP_NOP};
 
         // Go to Select-DR (TMS=1)
         jtag_pin1_i = 1;
