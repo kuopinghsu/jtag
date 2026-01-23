@@ -23,7 +23,10 @@ module jtag_instruction_register (
 
     // Shift logic with TAP reset support
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n || tap_reset) begin
+        if (!rst_n) begin
+            ir_shift_reg <= DEFAULT_IR;
+            ir_latch     <= DEFAULT_IR;
+        end else if (tap_reset) begin
             ir_shift_reg <= DEFAULT_IR;
             ir_latch     <= DEFAULT_IR;
         end else if (capture_ir) begin

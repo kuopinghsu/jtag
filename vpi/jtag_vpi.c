@@ -27,7 +27,7 @@
 
 // VPI handles for JTAG signals
 static vpiHandle tck_h, tms_h, tdi_h, tdo_h, trst_n_h, mode_select_h;
-static vpiHandle tco_h, tdi_oscan_h;
+static vpiHandle tco_h;
 static vpiHandle clk_h, rst_n_h;
 static vpiHandle idcode_h, debug_req_h, active_mode_h;
 
@@ -252,7 +252,6 @@ static int jtag_vpi_init(p_cb_data cb_data) {
     trst_n_h = vpi_handle_by_name("jtag_tb.dut.trst_n", NULL);
     mode_select_h = vpi_handle_by_name("jtag_tb.dut.mode_select", NULL);
     tco_h = vpi_handle_by_name("jtag_tb.dut.tco", NULL);
-    tdi_oscan_h = vpi_handle_by_name("jtag_tb.dut.tdi_oscan", NULL);
     clk_h = vpi_handle_by_name("jtag_tb.dut.clk", NULL);
     rst_n_h = vpi_handle_by_name("jtag_tb.dut.rst_n", NULL);
     idcode_h = vpi_handle_by_name("jtag_tb.dut.idcode", NULL);

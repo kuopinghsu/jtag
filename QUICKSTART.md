@@ -261,7 +261,8 @@ Synthesis:
 
 ### cJTAG Signals
 - `tco`: Combined clock/data
-- `tdi_oscan`: Data input
+- `tmsc_in`: Data input
+- `tmsc_out`: Data output
 - `mode_select`: Pin to switch modes
 
 ### IDCODE Value

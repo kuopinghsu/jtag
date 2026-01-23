@@ -242,7 +242,6 @@ module jtag_interface (
     input  logic       tmsc_in,          // Bidirectional data
     output logic       tmsc_out,
     output logic       tmsc_oen,
-    output logic       tdi_oscan,
 
     // Internal JTAG Signals
     output logic       jtag_clk,

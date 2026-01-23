@@ -3,6 +3,7 @@
 
 # Read design files
 read_verilog -sv ../src/jtag/jtag_dmi_pkg.sv
+read_verilog -sv ../src/jtag/jtag_tap_pkg.sv
 read_verilog -sv ../src/jtag/jtag_tap_controller.sv
 read_verilog -sv ../src/jtag/jtag_instruction_register.sv
 read_verilog -sv ../src/jtag/oscan1_controller.sv

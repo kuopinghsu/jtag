@@ -3,6 +3,8 @@
  * Implements the JTAG Test Access Port state machine according to IEEE 1149.1
  */
 
+import jtag_tap_pkg::*;
+
 module jtag_tap_controller (
     input  logic       clk,
     input  logic       rst_n,
@@ -21,27 +23,7 @@ module jtag_tap_controller (
     output logic       tap_reset
 );
 
-    // TAP Controller States
-    typedef enum logic [3:0] {
-        TEST_LOGIC_RESET = 4'h0,
-        RUN_TEST_IDLE    = 4'h1,
-        DR_SELECT_SCAN   = 4'h2,
-        DR_CAPTURE       = 4'h3,
-        DR_SHIFT         = 4'h4,
-        DR_EXIT1         = 4'h5,
-        DR_PAUSE         = 4'h6,
-        DR_EXIT2         = 4'h7,
-        DR_UPDATE        = 4'h8,
-        IR_SELECT_SCAN   = 4'h9,
-        IR_CAPTURE       = 4'hA,
-        IR_SHIFT         = 4'hB,
-        IR_EXIT1         = 4'hC,
-        IR_PAUSE         = 4'hD,
-        IR_EXIT2         = 4'hE,
-        IR_UPDATE        = 4'hF
-    } tap_state_t;
-
-    tap_state_t current_state, next_state;
+    jtag_tap_pkg::tap_state_t current_state, next_state;
 
     // TAP State Machine
     always_ff @(posedge clk or negedge rst_n) begin

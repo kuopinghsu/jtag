@@ -132,7 +132,10 @@ verilator: $(BUILD_DIR)
 	$(VERILATOR) $(VERILATOR_FLAGS) \
 		-I$(JTAG_DIR) -I$(DBG_DIR) -I$(SRC_DIR) -I$(TB_DIR) \
 		-Mdir $(VERILATOR_DIR) \
-		$(JTAG_DIR)/*.sv $(DBG_DIR)/*.sv $(TB_DIR)/jtag_tb.sv $(SIM_DIR)/sim_main.cpp $(SIM_DIR)/jtag_vpi_server.cpp
+		$(JTAG_DIR)/*_pkg.sv \
+		$(filter-out $(wildcard $(JTAG_DIR)/*_pkg.sv), $(wildcard $(JTAG_DIR)/*.sv)) \
+		$(DBG_DIR)/*.sv $(TB_DIR)/jtag_tb.sv \
+		$(SIM_DIR)/sim_main.cpp $(SIM_DIR)/jtag_vpi_server.cpp
 	@echo "✓ Verilator build complete"
 
 system: $(BUILD_DIR)
@@ -141,7 +144,9 @@ system: $(BUILD_DIR)
 	$(VERILATOR) $(VERILATOR_SYS_FLAGS) \
 		-I$(JTAG_DIR) -I$(DBG_DIR) -I$(SRC_DIR) -I$(TB_DIR) \
 		-Mdir $(VERILATOR_DIR) \
-		$(JTAG_DIR)/*.sv $(DBG_DIR)/*.sv $(SRC_DIR)/system_top.sv $(TB_DIR)/system_tb.sv $(SIM_DIR)/sim_system_main.cpp
+		$(JTAG_DIR)/*_pkg.sv \
+		$(filter-out $(wildcard $(JTAG_DIR)/*_pkg.sv), $(wildcard $(JTAG_DIR)/*.sv)) \
+		$(DBG_DIR)/*.sv $(SRC_DIR)/system_top.sv $(TB_DIR)/system_tb.sv $(SIM_DIR)/sim_system_main.cpp
 	@echo "✓ System build complete"
 
 vpi: $(BUILD_DIR)
@@ -255,7 +260,9 @@ $(BUILD_DIR)/jtag_vpi: $(BUILD_DIR)
 		-I$(JTAG_DIR) -I$(DBG_DIR) -I$(SRC_DIR) -I$(TB_DIR) -I$(SIM_DIR) \
 		-Mdir $(VERILATOR_DIR) \
 		-o ../jtag_vpi \
-		$(SIM_DIR)/jtag_vpi_top.sv $(JTAG_DIR)/*.sv \
+		$(SIM_DIR)/jtag_vpi_top.sv \
+		$(JTAG_DIR)/*_pkg.sv \
+		$(filter-out $(wildcard $(JTAG_DIR)/*_pkg.sv), $(wildcard $(JTAG_DIR)/*.sv)) \
 		$(SIM_DIR)/sim_vpi_main.cpp $(SIM_DIR)/jtag_vpi_server.cpp \
 		$(VERILATOR_CPPFLAGS)
 	@echo "✓ VPI simulation built: build/jtag_vpi"

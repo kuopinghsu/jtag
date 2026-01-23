@@ -507,7 +507,8 @@ See [syn/README.md](syn/README.md) for detailed synthesis documentation.
 
 ### cJTAG Interface (2-wire)
 - `tco`: Test clock/data combined output
-- `tdi_oscan`: Test data input (OScan1 format)
+- `tmsc_in`: Test data input
+- `tmsc_out`: Test data output
 
 ### Control
 - `mode_select`: 0=JTAG, 1=cJTAG

@@ -3,6 +3,7 @@
 
 # Read design files
 read_verilog -sv ../src/jtag/jtag_dmi_pkg.sv
+read_verilog -sv ../src/jtag/jtag_tap_pkg.sv
 read_verilog -sv ../src/dbg/riscv_debug_module.sv
 
 # Elaborate design

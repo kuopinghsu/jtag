@@ -21,7 +21,6 @@ module jtag_interface (
     input  logic       tmsc_in,         // cJTAG TMSC input (bidirectional)
     output logic       tmsc_out,        // cJTAG TMSC output
     output logic       tmsc_oen,        // cJTAG TMSC output enable
-    output logic       tdi_oscan,       // cJTAG return data (for debug)
 
     // Internal JTAG signals
     output logic       jtag_clk,
@@ -85,8 +84,6 @@ module jtag_interface (
             tmsc_out = oscan1_tmsc_out;
             tmsc_oen = oscan1_tmsc_oen;
 
-            // TDO return for debugging
-            tdi_oscan = jtag_tdo;
             tdo = jtag_tdo;              // Pass through TDO in cJTAG mode
         end else begin
             // Standard JTAG mode - direct connection
@@ -98,7 +95,6 @@ module jtag_interface (
             // TMSC not used in JTAG mode
             tmsc_out = 1'b0;
             tmsc_oen = 1'b0;
-            tdi_oscan = 1'b0;
 
             // TDO output in JTAG mode
             tdo = jtag_tdo;
